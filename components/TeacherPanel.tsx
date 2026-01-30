@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Lesson } from '../types';
 import { db } from '../services/db';
-import { Clock, BookOpen, Check, AlertCircle, Sparkles, XCircle } from 'lucide-react';
+import { Clock, BookOpen, Check, AlertCircle, Sparkles, XCircle, CalendarDays } from 'lucide-react';
 
 interface Props {
   user: User;
@@ -21,6 +21,7 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   
   const isTooEarly = now < startTime;
   const isTooLate = now > endTime;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const canEnter = !isTooEarly && !isTooLate;
   
   // Update clock every second
@@ -48,16 +49,21 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const toggleGrade = (grade: string) => {
     if (selectedGrades.includes(grade)) {
       setSelectedGrades(prev => prev.filter(g => g !== grade));
+      // Clear error if related to selection limit
+      if (error && error.includes("tối đa")) setError(null);
     } else {
-      if (selectedGrades.length < 2) {
-        setSelectedGrades(prev => [...prev, grade]);
+      if (selectedGrades.length >= 2) {
+        setError("Quý thầy/cô chỉ được chọn tối đa 2 khối lớp.");
+        return;
       }
+      setSelectedGrades(prev => [...prev, grade]);
+      setError(null);
     }
   };
 
   const handleDraw = async () => {
     if (selectedGrades.length === 0) {
-      setError("Vui lòng chọn ít nhất 1 khối lớp.");
+      setError("Vui lòng chọn ít nhất 1 khối lớp để bốc thăm.");
       return;
     }
     setError(null);
@@ -76,7 +82,7 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
         const updatedUser = db.getCurrentUser();
         if (updatedUser) onUpdateUser(updatedUser);
       } else {
-        setError("Không tìm thấy bài học phù hợp với tiêu chí của bạn trong ngân hàng đề.");
+        setError("Hiện tại đã hết tiết dạy phù hợp trong các khối đã chọn. Vui lòng chọn khối lớp khác.");
       }
     } catch (e: any) {
       setError(e.message || "Có lỗi xảy ra.");
@@ -125,9 +131,13 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
           <XCircle className="w-16 h-16 mx-auto mb-4 text-red-500" />
           <h2 className="text-2xl font-bold mb-2">Đã hết giờ bốc thăm</h2>
           <p className="text-lg mb-6">Rất tiếc, thời gian bốc thăm quy định cho cô/thầy <strong>{user.name}</strong> đã kết thúc.</p>
-          <div className="bg-white/50 p-4 rounded-lg">
-             <div className="flex justify-between items-center text-sm">
-                <span className="text-red-900/60">Hạn chót:</span>
+          <div className="bg-white/50 p-4 rounded-lg space-y-2">
+             <div className="flex justify-between items-center text-sm border-b border-red-100 pb-2">
+                <span className="text-red-900/60">Bắt đầu:</span>
+                <span className="font-mono font-semibold text-red-700">{formatDate(startTime)}</span>
+             </div>
+             <div className="flex justify-between items-center text-sm pt-1">
+                <span className="text-red-900/60">Kết thúc:</span>
                 <span className="font-mono font-semibold text-red-700">{formatDate(endTime)}</span>
              </div>
           </div>
@@ -139,17 +149,36 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
-      <header className="text-center space-y-2">
+      <header className="text-center space-y-3">
         <h1 className="text-3xl font-bold text-slate-800">Bốc Thăm Bài Dạy</h1>
         <p className="text-slate-600">Giáo viên: <span className="font-semibold text-blue-600">{user.name}</span></p>
         {user.subjectGroup && <span className="inline-block px-3 py-1 bg-blue-50 text-blue-700 text-xs font-semibold rounded-full">Môn: {user.subjectGroup}</span>}
-        <div className="flex justify-center items-center gap-2 text-xs text-slate-500 mt-2">
-          <Clock className="w-3 h-3" />
-          <span>Thời gian còn lại: {endTime > now ? (
-             <span className="text-green-600 font-medium">
-               {Math.floor((endTime.getTime() - now.getTime()) / 60000)} phút
-             </span>
-          ) : "Đã hết giờ"}</span>
+        
+        <div className="bg-white border border-slate-200 rounded-xl p-4 max-w-lg mx-auto shadow-sm mt-4">
+            <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3 flex items-center justify-center gap-2">
+               <CalendarDays className="w-4 h-4" /> Thời Gian Quy Định
+            </h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="flex flex-col items-center p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-400 text-xs mb-1">Thời gian bắt đầu</span>
+                    <span className="font-bold text-slate-700">{formatDate(startTime)}</span>
+                </div>
+                <div className="flex flex-col items-center p-2 bg-slate-50 rounded-lg">
+                    <span className="text-slate-400 text-xs mb-1">Thời gian kết thúc</span>
+                    <span className="font-bold text-slate-700">{formatDate(endTime)}</span>
+                </div>
+            </div>
+            
+            {!result && (
+              <div className="mt-3 pt-3 border-t border-slate-100 flex justify-center items-center gap-2 text-xs text-slate-500">
+                <Clock className="w-3 h-3 text-green-500" />
+                <span>Còn lại: {endTime > now ? (
+                  <span className="text-green-600 font-bold">
+                    {Math.max(0, Math.floor((endTime.getTime() - now.getTime()) / 60000))} phút
+                  </span>
+                ) : "Đã hết giờ"}</span>
+              </div>
+            )}
         </div>
       </header>
 
@@ -193,7 +222,9 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
               <BookOpen className="w-5 h-5 text-blue-500" />
               Lựa chọn khối lớp
             </h3>
-            <p className="text-sm text-slate-500 mt-1">Vui lòng chọn 1 hoặc 2 khối lớp mong muốn giảng dạy để tiến hành bốc thăm.</p>
+            <p className="text-sm text-slate-500 mt-1">
+              Vui lòng chọn <strong>1 hoặc tối đa 2 khối lớp</strong> mong muốn giảng dạy. Hệ thống sẽ chọn ngẫu nhiên bài giảng trong các khối đã chọn, đồng thời <strong>ưu tiên các tiết chưa có người bốc</strong>.
+            </p>
           </div>
           
           <div className="p-8">
@@ -201,19 +232,16 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mb-8">
                 {availableGrades.map((grade) => {
                   const isSelected = selectedGrades.includes(grade);
-                  const isDisabled = !isSelected && selectedGrades.length >= 2;
                   
                   return (
                     <button
                       key={grade}
                       onClick={() => toggleGrade(grade)}
-                      disabled={isDisabled}
                       className={`
                         relative p-4 rounded-xl border-2 transition-all duration-200 text-sm font-medium
                         ${isSelected 
                           ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-md transform scale-105' 
                           : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'}
-                        ${isDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                       `}
                     >
                       {isSelected && (
@@ -234,8 +262,8 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
 
             {error && (
               <div className="mb-6 p-4 rounded-lg bg-red-50 text-red-700 flex items-center gap-3 animate-pulse">
-                <AlertCircle className="w-5 h-5" />
-                {error}
+                <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                <span>{error}</span>
               </div>
             )}
 

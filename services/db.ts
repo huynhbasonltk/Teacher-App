@@ -1,7 +1,7 @@
 import { Lesson, User, Role, GoogleConfig, AppSettings } from '../types';
 
-const DEFAULT_SUBJECTS = ["Toán", "Vật Lý", "Hóa Học", "Sinh Học", "Ngữ Văn", "Lịch Sử", "Địa Lý", "Tiếng Anh", "GDCD"];
-const DEFAULT_GRADES = ["Khối 6", "Khối 7", "Khối 8", "Khối 9", "Khối 10", "Khối 11", "Khối 12"];
+const DEFAULT_SUBJECTS = ["Toán", "Khoa học tự nhiên", "Lịch sử & Địa lí", "Tin Học", "Ngữ Văn", "Mĩ thuật", "Âm nhạc", "Tiếng Anh", "GDCD", "Giáo dục thể chất","Công nghệ", "HĐTN-HN"];
+const DEFAULT_GRADES = ["Khối 6", "Khối 7", "Khối 8", "Khối 9"];
 
 // Seed data to simulate Google Sheet import and Admin setup
 const SEED_LESSONS: Lesson[] = Array.from({ length: 50 }).map((_, i) => ({
@@ -102,10 +102,19 @@ export const db = {
 
     // 2. Google Sync (if configured)
     const config = db.getGoogleConfig();
-    if (config && config.scriptUrl) {
+    const scriptUrl = config?.scriptUrl?.trim();
+    
+    if (scriptUrl) {
+      if (!navigator.onLine) {
+        throw new Error("Đã lưu vào máy nhưng không có mạng để đồng bộ Google Sheet.");
+      }
+
       try {
-        await fetch(config.scriptUrl, {
+        // Use no-cors to avoid "Failed to fetch" errors on redirects/CORS
+        // We assume success if the network request doesn't throw
+        await fetch(scriptUrl, {
           method: 'POST',
+          mode: 'no-cors',
           body: JSON.stringify({
             action: 'addUser',
             data: user
@@ -114,8 +123,8 @@ export const db = {
             'Content-Type': 'text/plain;charset=utf-8',
           },
         });
-      } catch (err) {
-        console.error("Failed to sync user to Google Sheet", err);
+      } catch (err: any) {
+        throw new Error("Đã lưu vào máy nhưng LỖI đồng bộ Google Sheet: " + (err.message || "Lỗi kết nối"));
       }
     }
   },
@@ -185,7 +194,7 @@ export const db = {
 
   // Sync Data from Google Apps Script Web App
   syncFromGoogle: async (config: GoogleConfig): Promise<{ userCount: number, lessonCount: number }> => {
-    const { scriptUrl } = config;
+    const scriptUrl = config.scriptUrl?.trim();
 
     if (!scriptUrl) throw new Error("Vui lòng nhập đường dẫn Web App của Google Apps Script.");
 
@@ -268,6 +277,16 @@ export const db = {
       db.setLessons(newLessons);
       db.saveGoogleConfig(config);
 
+      // CRITICAL: Update current session if the logged-in user was updated in this sync
+      // Since sync recreates IDs (imported-user-x), we match by Email
+      const currentUserSession = db.getCurrentUser();
+      if (currentUserSession) {
+        const updatedUser = newUsers.find(u => u.email === currentUserSession.email);
+        if (updatedUser) {
+           localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(updatedUser));
+        }
+      }
+
       return { userCount: newUsers.length, lessonCount: newLessons.length };
 
     } catch (error: any) {
@@ -276,7 +295,7 @@ export const db = {
     }
   },
 
-  // Core Logic: Random Draw (Now Async for Google Sync)
+  // Core Logic: Random Draw (Async for Google Sync)
   drawLesson: async (teacherId: string, selectedGrades: string[]): Promise<Lesson | null> => {
     const user = db.getUsers().find(u => u.id === teacherId);
     if (!user) throw new Error("User not found");
@@ -292,34 +311,72 @@ export const db = {
     }
 
     const allLessons = db.getLessons();
+    const allUsers = db.getUsers();
     
-    // Filter logic
-    const eligibleLessons = allLessons.filter(lesson => {
+    // --- COLLISION DETECTION LOGIC V2 (Tiered) ---
+    // 1. Calculate how many times each slot (Subject + Grade + Week + Period) has been taken
+    const slotUsage: Record<string, number> = {};
+
+    allUsers.forEach(u => {
+      if (u.hasDrawn && u.drawnLessonId) {
+        const drawnLesson = allLessons.find(al => al.id === u.drawnLessonId);
+        if (drawnLesson) {
+          const signature = `${drawnLesson.subject}-${drawnLesson.grade}-${drawnLesson.week}-${drawnLesson.period}`;
+          slotUsage[signature] = (slotUsage[signature] || 0) + 1;
+        }
+      }
+    });
+
+    // 2. Filter valid candidates based on Teacher's Subject and Selected Grades
+    const candidates = allLessons.filter(lesson => {
       const matchGrade = selectedGrades.includes(lesson.grade);
-      const matchSubject = user.subjectGroup ? lesson.subject === user.subjectGroup : true; 
+      const matchSubject = user.subjectGroup ? lesson.subject === user.subjectGroup : true;
       return matchGrade && matchSubject;
     });
 
-    if (eligibleLessons.length === 0) {
+    if (candidates.length === 0) {
       return null;
     }
 
-    // Random selection
-    const randomIndex = Math.floor(Math.random() * eligibleLessons.length);
-    const selectedLesson = eligibleLessons[randomIndex];
+    // 3. Strategy A: Prioritize Perfectly Unique Slots (Usage = 0)
+    let finalPool = candidates.filter(lesson => {
+      const signature = `${lesson.subject}-${lesson.grade}-${lesson.week}-${lesson.period}`;
+      return !slotUsage[signature]; // Usage is 0 or undefined
+    });
 
-    // 1. Save state locally
+    // 4. Strategy B: Fallback to Low Collision Slots if no unique slots found
+    // Allow up to 2 people in the same slot (Threshold = 2)
+    // This satisfies "Trùng tiết với tỉ lệ ít vẫn duyệt được"
+    if (finalPool.length === 0) {
+      const MAX_USAGE_TOLERANCE = 2; 
+      finalPool = candidates.filter(lesson => {
+        const signature = `${lesson.subject}-${lesson.grade}-${lesson.week}-${lesson.period}`;
+        return (slotUsage[signature] || 0) < MAX_USAGE_TOLERANCE;
+      });
+    }
+
+    if (finalPool.length === 0) {
+      return null;
+    }
+
+    // Random selection from the best available pool
+    const randomIndex = Math.floor(Math.random() * finalPool.length);
+    const selectedLesson = finalPool[randomIndex];
+
+    // 5. Save state locally
     user.hasDrawn = true;
     user.drawnLessonId = selectedLesson.id;
     db.updateUser(user);
 
-    // 2. Sync result to Google Sheet (Fire and forget, or await?)
-    // We await it but catch errors so UI doesn't break if internet is bad
+    // 6. Sync result to Google Sheet
     const config = db.getGoogleConfig();
-    if (config && config.scriptUrl) {
+    const scriptUrl = config?.scriptUrl?.trim();
+
+    if (scriptUrl) {
       try {
-        await fetch(config.scriptUrl, {
+        await fetch(scriptUrl, {
           method: 'POST',
+          mode: 'no-cors',
           body: JSON.stringify({
             action: 'updateDraw',
             email: user.email,
@@ -331,8 +388,8 @@ export const db = {
           },
         });
       } catch (err) {
-        console.error("Failed to sync draw result to Google Sheet", err);
-        // Note: The local state is already saved, so we consider this a success for the user.
+        // Just log internal warning, user already saw result
+        // console.warn("Failed to sync draw result to Google Sheet", err);
       }
     }
 

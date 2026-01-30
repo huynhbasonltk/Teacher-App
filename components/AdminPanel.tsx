@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
-import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Copy, Terminal, FileDown } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Copy, Terminal, FileDown, Upload, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export const AdminPanel: React.FC = () => {
@@ -18,6 +18,9 @@ export const AdminPanel: React.FC = () => {
   
   // New state for saving user specifically
   const [isSavingUser, setIsSavingUser] = useState(false);
+  
+  // File Input Ref for Import
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Google Config State
   const [googleConfig, setGoogleConfig] = useState({
@@ -99,6 +102,128 @@ export const AdminPanel: React.FC = () => {
       setError(err.message || "Lỗi khi kết nối Google Sheet.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // --- EXCEL IMPORT LOGIC ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      // Use raw parsing to get strings primarily
+      const workbook = XLSX.read(data);
+      
+      let importedLessonsCount = 0;
+      let importedUsersCount = 0;
+
+      // 1. Parse Lessons (Looking for 'Lessons' or 'BaiDay' sheet)
+      const lessonSheetName = workbook.SheetNames.find(n => 
+        n.toLowerCase() === 'lessons' || n.toLowerCase().includes('bài')
+      );
+      
+      if (lessonSheetName) {
+        const ws = workbook.Sheets[lessonSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+        
+        // Remove header row
+        if (jsonData.length > 0) jsonData.shift();
+
+        const newLessons: Lesson[] = jsonData
+          .filter(row => row && row.length >= 5 && row[0]) // Basic validation: Must have subject
+          .map((row, index) => ({
+            id: `imported-excel-lesson-${Date.now()}-${index}`,
+            subject: String(row[0] || '').trim(),
+            grade: String(row[1] || '').trim(),
+            week: parseInt(row[2]) || 1,
+            period: parseInt(row[3]) || 1,
+            name: String(row[4] || '').trim()
+          }));
+
+        if (newLessons.length > 0) {
+          db.setLessons(newLessons);
+          importedLessonsCount = newLessons.length;
+        }
+      }
+
+      // 2. Parse Users (Looking for 'Users' or 'GiaoVien' sheet)
+      const userSheetName = workbook.SheetNames.find(n => 
+        n.toLowerCase() === 'users' || n.toLowerCase().includes('giáo')
+      );
+
+      if (userSheetName) {
+         const ws = workbook.Sheets[userSheetName];
+         const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+         if (jsonData.length > 0) jsonData.shift();
+
+         const newUsers: User[] = [];
+         
+         jsonData.forEach((row, index) => {
+            if (!row || row.length < 2 || !row[1]) return; // Must have email
+            
+            // Helper to parse potential Excel dates (which might be numbers) or strings
+            const parseExcelDate = (val: any, defaultDate: Date): string => {
+                if (!val) return defaultDate.toISOString();
+                // If it's a number (Excel serial date), usually not handled by raw read unless we use cellDates:true
+                // Assuming string format 'YYYY-MM-DD HH:mm' from template or ISO string
+                const d = new Date(val);
+                if (!isNaN(d.getTime())) return d.toISOString();
+                return defaultDate.toISOString();
+            };
+
+            const roleStr = String(row[3] || '').trim().toUpperCase();
+
+            newUsers.push({
+              id: `imported-excel-user-${Date.now()}-${index}`,
+              name: String(row[0]),
+              email: String(row[1]),
+              password: String(row[2] || '123'),
+              role: roleStr === 'ADMIN' ? Role.ADMIN : Role.TEACHER,
+              subjectGroup: String(row[4] || ''),
+              drawStartTime: parseExcelDate(row[5], new Date()),
+              drawEndTime: parseExcelDate(row[6], new Date(Date.now() + 86400000)),
+              hasDrawn: false 
+            });
+         });
+
+         // Ensure Admin exists
+         if (!newUsers.some(u => u.role === Role.ADMIN)) {
+            const currentAdmin = users.find(u => u.role === Role.ADMIN);
+            if (currentAdmin) newUsers.unshift(currentAdmin);
+            else {
+                 newUsers.unshift({
+                    id: 'admin-fallback',
+                    email: 'admin@edu.vn',
+                    password: 'admin',
+                    name: 'Quản Trị Viên',
+                    role: Role.ADMIN,
+                    drawStartTime: new Date().toISOString(),
+                    drawEndTime: new Date().toISOString(),
+                    hasDrawn: false
+                  });
+            }
+         }
+
+         if (newUsers.length > 0) {
+            db.setUsers(newUsers);
+            importedUsersCount = newUsers.length;
+         }
+      }
+
+      if (importedLessonsCount > 0 || importedUsersCount > 0) {
+        setSuccess(`Nhập thành công: ${importedLessonsCount} bài dạy và ${importedUsersCount} người dùng.`);
+        refresh();
+      } else {
+        setError("Không tìm thấy dữ liệu hợp lệ trong file (Kiểm tra tên Sheet 'Users' và 'Lessons').");
+      }
+
+    } catch (err: any) {
+      console.error(err);
+      setError("Lỗi khi đọc file Excel: " + err.message);
+    } finally {
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -230,7 +355,22 @@ export const AdminPanel: React.FC = () => {
       refresh();
       setSuccess("Thêm giáo viên thành công!");
     } catch (err: any) {
-      setError(err.message || "Có lỗi xảy ra.");
+      if (err.message && err.message.includes("đồng bộ")) {
+        // This is a partial success (saved locally, failed sync)
+        setNewUser({
+          name: '',
+          email: '',
+          password: '',
+          subjectGroup: settings.subjects[0] || '',
+          drawStartTime: '',
+          drawEndTime: ''
+        });
+        setIsModalOpen(false);
+        refresh();
+        setSuccess(`Đã lưu giáo viên nhưng: ${err.message}`);
+      } else {
+        setError(err.message || "Có lỗi xảy ra.");
+      }
     } finally {
       setIsSavingUser(false);
     }
@@ -381,8 +521,11 @@ function formatDate(date) {
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 relative">
       {success && (
-        <div className="bg-green-100 border border-green-200 text-green-800 px-4 py-3 rounded-lg flex items-center gap-2 animate-fade-in">
-          <CheckCircle className="w-5 h-5" />
+        <div className={`
+          border px-4 py-3 rounded-lg flex items-center gap-2 animate-fade-in
+          ${success.includes("LỖI") ? "bg-amber-100 border-amber-200 text-amber-800" : "bg-green-100 border-green-200 text-green-800"}
+        `}>
+          {success.includes("LỖI") ? <AlertTriangle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
           {success}
           <button onClick={() => setSuccess('')} className="ml-auto"><X className="w-4 h-4" /></button>
         </div>
@@ -401,6 +544,22 @@ function formatDate(date) {
             <Database className="w-4 h-4" />
             Đồng bộ Sheet
           </button>
+          
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors"
+          >
+            <Upload className="w-4 h-4" />
+            Nhập Excel
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            accept=".xlsx, .xls" 
+            className="hidden" 
+          />
+
           <button 
             onClick={handleExportExcel}
             className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors"

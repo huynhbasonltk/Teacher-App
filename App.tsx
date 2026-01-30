@@ -42,8 +42,15 @@ export default function App() {
     setIsSyncing(true);
     try {
       await db.syncFromGoogle({ scriptUrl: url });
-      // We don't show a loud success message for auto-sync, just console
       console.log("Auto-sync successful");
+      
+      // REFRESH STATE: Update user UI if data changed in background sync
+      const currentUser = db.getCurrentUser();
+      // We check if the current logged-in user (in state) matches the one in DB (by email)
+      // to ensure we update their permissions/times immediately.
+      if (currentUser && user && currentUser.email === user.email) {
+         setUser(currentUser);
+      }
     } catch (e) {
       console.error("Auto-sync failed", e);
     } finally {
@@ -65,6 +72,12 @@ export default function App() {
       });
       // Save valid config
       db.saveGoogleConfig({ scriptUrl: configUrl });
+      
+      // Update current user state if logged in
+      const currentUser = db.getCurrentUser();
+      if (currentUser && user && currentUser.email === user.email) {
+         setUser(currentUser);
+      }
     } catch (err: any) {
       setSyncResult({
         success: false,
@@ -108,17 +121,42 @@ export default function App() {
 
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 relative">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4 relative">
-              <GraduationCap className="w-8 h-8 text-blue-600" />
-              {isSyncing && (
-                <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-white"></span>
-                </span>
-              )}
+            {/* Logo Section */}
+            <div className="flex flex-col items-center justify-center mb-6">
+              <div className="w-28 h-28 mb-3 relative flex items-center justify-center">
+                 {/* Image Logo - Defaulting to ./logo.png. 
+                     Use onError to fallback if image is missing 
+                 */}
+                 <img 
+                   src="./logo.png" 
+                   onError={(e) => {
+                     e.currentTarget.style.display = 'none';
+                     e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                   }}
+                   alt="Logo Trường" 
+                   className="w-full h-full object-contain drop-shadow-sm"
+                 />
+                 
+                 {/* Fallback Icon */}
+                 <div className="hidden w-24 h-24 bg-blue-100 rounded-full flex items-center justify-center relative">
+                    <GraduationCap className="w-12 h-12 text-blue-600" />
+                    {isSyncing && (
+                      <span className="absolute -bottom-1 -right-1 flex h-4 w-4">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-4 w-4 bg-blue-500 border-2 border-white"></span>
+                      </span>
+                    )}
+                 </div>
+              </div>
+              
+              <h2 className="text-xl font-bold text-blue-900 uppercase tracking-wide leading-tight">
+                Trường THCS<br/>Lý Thường Kiệt
+              </h2>
+              <div className="w-16 h-1 bg-blue-500 rounded-full my-3"></div>
+              <p className="text-slate-500 font-medium">Hội Thi Giáo Viên Dạy Giỏi</p>
             </div>
-            <h1 className="text-2xl font-bold text-slate-800">Cổng Đăng Nhập</h1>
-            <p className="text-slate-500 mt-2">Hội Thi Giáo Viên Dạy Giỏi</p>
+            
+            <h1 className="text-sm font-semibold text-slate-400 uppercase tracking-widest">Cổng Đăng Nhập</h1>
           </div>
           
           <form onSubmit={handleLogin} className="space-y-6">
@@ -155,14 +193,13 @@ export default function App() {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg transition-colors shadow-lg shadow-blue-500/30"
+              className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-lg transition-colors shadow-lg shadow-blue-500/30 uppercase tracking-wide text-sm"
             >
               Đăng Nhập
             </button>
             
-            <div className="mt-4 p-4 bg-slate-50 rounded text-xs text-slate-500">
-              <p className="font-bold mb-1">Hướng dẫn:</p>
-              <p>Nếu bạn không đăng nhập được, vui lòng nhấn vào nút <strong>"Kết nối dữ liệu"</strong> ở góc phải màn hình để cập nhật danh sách giáo viên mới nhất từ hệ thống.</p>
+            <div className="mt-4 p-4 bg-slate-50 rounded text-xs text-slate-500 text-center">
+              Nếu bạn không đăng nhập được, vui lòng liên hệ quản trị viên nhà trường.
             </div>
           </form>
         </div>
@@ -230,10 +267,14 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                <GraduationCap className="text-white w-5 h-5" />
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center overflow-hidden">
+                <img src="./logo.png" alt="Logo" className="w-full h-full object-contain" onError={(e) => e.currentTarget.style.display='none'} />
+                <GraduationCap className="text-blue-600 w-6 h-6 hidden" /> 
               </div>
-              <span className="font-bold text-xl text-slate-800 tracking-tight hidden sm:block">Hội Thi GVDG</span>
+              <div className="flex flex-col">
+                 <span className="font-bold text-sm text-blue-900 uppercase leading-none">THCS Lý Thường Kiệt</span>
+                 <span className="text-xs text-slate-500">Hội Thi GVDG</span>
+              </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right hidden sm:block">
@@ -261,8 +302,8 @@ export default function App() {
       </main>
       
       <footer className="bg-white border-t border-slate-200 py-6 mt-8">
-        <div className="max-w-7xl mx-auto px-6 text-center text-slate-400 text-sm">
-          &copy; {new Date().getFullYear()} Hệ thống quản lý hội thi. Được thiết kế cho mục đích demo.
+        <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm font-medium">
+          Copyright Huỳnh Bá Sơn
         </div>
       </footer>
     </div>
