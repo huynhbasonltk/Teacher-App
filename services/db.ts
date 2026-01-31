@@ -321,6 +321,22 @@ export const db = {
     }
   },
 
+  // Reset a user's draw status to allow them to draw again
+  resetDraw: async (userId: string): Promise<void> => {
+    const user = db.getUsers().find(u => u.id === userId);
+    if (!user) throw new Error("User not found");
+
+    // Reset local state
+    user.hasDrawn = false;
+    delete user.drawnLessonId; // Clear the ID
+    db.updateUser(user);
+
+    // Sync to Google
+    // We reuse syncUserToGoogle which sends 'updateUser' action
+    // We assume the script updates the 'hasDrawn' column to FALSE based on the payload
+    await db.syncUserToGoogle(user);
+  },
+
   // Core Logic: Random Draw (Async for Google Sync)
   drawLesson: async (teacherId: string, selectedGrades: string[]): Promise<Lesson | null> => {
     const user = db.getUsers().find(u => u.id === teacherId);
@@ -410,7 +426,7 @@ export const db = {
           },
         });
       } catch (err) {
-        // Log warning
+        console.error("Sync draw result failed", err);
       }
     }
 

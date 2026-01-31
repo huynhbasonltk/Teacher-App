@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
-import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw, RotateCcw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -91,6 +91,22 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
       } catch (e: any) {
         setError(e.message || "Không thể xóa giáo viên.");
       }
+    }
+  };
+
+  const handleResetDraw = async (userId: string, userName: string) => {
+    if (!isSuperAdmin) {
+      setError("Bạn không có quyền này.");
+      return;
+    }
+    if (window.confirm(`Bạn có chắc chắn muốn XÓA KẾT QUẢ bốc thăm của "${userName}" để họ bốc lại không?`)) {
+        try {
+            await db.resetDraw(userId);
+            refresh();
+            setSuccess(`Đã xóa kết quả của ${userName}, giáo viên có thể bốc lại ngay.`);
+        } catch(e: any) {
+            setError(e.message || "Lỗi khi reset bốc thăm.");
+        }
     }
   };
 
@@ -636,6 +652,15 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                     </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-1">
+                        {user.hasDrawn && isSuperAdmin && (
+                          <button
+                            onClick={() => handleResetDraw(user.id, user.name)}
+                            className="text-slate-400 hover:text-orange-600 transition-colors p-2 rounded-full hover:bg-orange-50"
+                            title="Xóa kết quả để bốc lại"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleExportSingleUser(user)}
                           className="text-slate-400 hover:text-green-600 transition-colors p-2 rounded-full hover:bg-green-50"

@@ -24,6 +24,11 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const canEnter = !isTooEarly && !isTooLate;
   
+  // Check if user subject requires 2 grades
+  const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc"];
+  const userSubject = user.subjectGroup?.trim() || "";
+  const isSpecialSubject = specialSubjects.some(s => s.toLowerCase() === userSubject.toLowerCase());
+  
   // Update clock every second
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -66,6 +71,13 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
       setError("Vui lòng chọn ít nhất 1 khối lớp để bốc thăm.");
       return;
     }
+
+    // Validation for special subjects
+    if (isSpecialSubject && selectedGrades.length < 2) {
+      setError(`Đối với môn ${userSubject}, quy định bắt buộc phải chọn đủ 2 khối lớp.`);
+      return;
+    }
+
     setError(null);
     setIsDrawing(true);
 
@@ -223,7 +235,12 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
               Lựa chọn khối lớp
             </h3>
             <p className="text-sm text-slate-500 mt-1">
-              Vui lòng chọn <strong>1 hoặc tối đa 2 khối lớp</strong> mong muốn giảng dạy. Hệ thống sẽ chọn ngẫu nhiên bài giảng trong các khối đã chọn, đồng thời <strong>ưu tiên các tiết chưa có người bốc</strong>.
+              {isSpecialSubject ? (
+                 <span>Đối với môn <strong className="text-blue-600">{user.subjectGroup}</strong>, quy định bắt buộc phải chọn <strong>đủ 2 khối lớp</strong>. </span>
+              ) : (
+                 <span>Vui lòng chọn <strong>1 hoặc tối đa 2 khối lớp</strong> mong muốn giảng dạy. </span>
+              )}
+              Hệ thống sẽ chọn ngẫu nhiên bài giảng trong các khối đã chọn, đồng thời <strong>ưu tiên các tiết chưa có người bốc</strong>.
             </p>
           </div>
           
