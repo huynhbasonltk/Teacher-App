@@ -4,7 +4,7 @@ import { db } from './services/db';
 import { AdminPanel } from './components/AdminPanel';
 import { TeacherPanel } from './components/TeacherPanel';
 import { LogOut, GraduationCap, Settings, RefreshCw, Cloud, X, Check, Database, AlertCircle } from 'lucide-react';
-
+import.meta.env.VITE_SCRIPT_URL;
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState('');
