@@ -247,7 +247,7 @@ export default function App() {
       
       <footer className="bg-white border-t border-slate-200 py-6 mt-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm font-medium">
-          Copyright Huỳnh Bá Sơn
+          Copyright@Huỳnh Bá Sơn
         </div>
       </footer>
     </div>
