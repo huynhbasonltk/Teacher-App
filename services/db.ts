@@ -1,8 +1,10 @@
 import { Lesson, User, Role, GoogleConfig, AppSettings } from '../types';
-import.meta.env.VITE_SCRIPT_URL;
 
-const DEFAULT_SUBJECTS = ["Toán", "Khoa học tự nhiên", "Lịch sử và Địa lí", "Tin Học", "Ngữ Văn", "Mĩ thuật", "Âm nhạc", "Tiếng Anh", "GDCD", "Giáo dục thể chất","Công nghệ", "HĐTN-HN"];
+const DEFAULT_SUBJECTS = ["Toán", "Khoa học tự nhiên", "Lịch sử & Địa lí", "Tin Học", "Ngữ Văn", "Mĩ thuật", "Âm nhạc", "Tiếng Anh", "GDCD", "Giáo dục thể chất","Công nghệ", "HĐTN-HN"];
 const DEFAULT_GRADES = ["Khối 6", "Khối 7", "Khối 8", "Khối 9"];
+
+// Hardcoded Script URL provided by user
+const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxj0mSYiaZKKL7yIZrTjPdBi5lt0euBkGBbtP6jTpz0QZuJRH-V7hSFhCZVviouYqMA9Q/exec";
 
 // Seed data to simulate Google Sheet import and Admin setup
 const SEED_LESSONS: Lesson[] = Array.from({ length: 50 }).map((_, i) => ({
@@ -74,6 +76,8 @@ export const db = {
       };
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(defaultSettings));
     }
+    // Always save the hardcoded config on init to ensure consistency
+    db.saveGoogleConfig({ scriptUrl: HARDCODED_SCRIPT_URL });
   },
 
   getSettings: (): AppSettings => {
@@ -101,9 +105,8 @@ export const db = {
     users.push(user);
     db.setUsers(users);
 
-    // 2. Google Sync (if configured)
-    const config = db.getGoogleConfig();
-    const scriptUrl = config?.scriptUrl?.trim();
+    // 2. Google Sync (Always use hardcoded URL)
+    const scriptUrl = HARDCODED_SCRIPT_URL;
     
     if (scriptUrl) {
       if (!navigator.onLine) {
@@ -111,8 +114,6 @@ export const db = {
       }
 
       try {
-        // Use no-cors to avoid "Failed to fetch" errors on redirects/CORS
-        // We assume success if the network request doesn't throw
         await fetch(scriptUrl, {
           method: 'POST',
           mode: 'no-cors',
@@ -126,6 +127,29 @@ export const db = {
         });
       } catch (err: any) {
         throw new Error("Đã lưu vào máy nhưng LỖI đồng bộ Google Sheet: " + (err.message || "Lỗi kết nối"));
+      }
+    }
+  },
+
+  // Update user in LocalStorage AND Google Sheet
+  syncUserToGoogle: async (user: User): Promise<void> => {
+    const scriptUrl = HARDCODED_SCRIPT_URL;
+
+    if (scriptUrl) {
+      if (!navigator.onLine) return; // Silent fail if offline, user relies on local
+      try {
+        await fetch(scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify({
+            action: 'updateUser',
+            data: user
+          }),
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        });
+      } catch (err) {
+        console.error("Sync user update failed", err);
+        throw new Error("Lỗi khi đồng bộ cập nhật lên Google Sheet.");
       }
     }
   },
@@ -183,21 +207,21 @@ export const db = {
     return u ? JSON.parse(u) : null;
   },
 
-  // Google Configuration
+  // Google Configuration - Always returns Hardcoded URL
   getGoogleConfig: (): GoogleConfig | null => {
-    const c = localStorage.getItem(STORAGE_KEYS.GOOGLE_CONFIG);
-    return c ? JSON.parse(c) : null;
+    return { scriptUrl: HARDCODED_SCRIPT_URL };
   },
 
   saveGoogleConfig: (config: GoogleConfig) => {
+    // We update local storage just in case, but code relies on const
     localStorage.setItem(STORAGE_KEYS.GOOGLE_CONFIG, JSON.stringify(config));
   },
 
   // Sync Data from Google Apps Script Web App
   syncFromGoogle: async (config: GoogleConfig): Promise<{ userCount: number, lessonCount: number }> => {
-    const scriptUrl = config.scriptUrl?.trim();
+    const scriptUrl = HARDCODED_SCRIPT_URL; // Force usage
 
-    if (!scriptUrl) throw new Error("Vui lòng nhập đường dẫn Web App của Google Apps Script.");
+    if (!scriptUrl) throw new Error("Lỗi cấu hình hệ thống (Thiếu Script URL).");
 
     try {
       const res = await fetch(scriptUrl);
@@ -224,19 +248,21 @@ export const db = {
               return defaultDate.toISOString();
            };
 
-           // 0:Name, 1:Email, 2:Pass, 3:Role, 4:Subject, 5:Start, 6:End
-           // Note: We ignore subsequent columns (Results) during import for simplicity, 
-           // or we could parse them if we wanted two-way sync. For now, assume import is for config.
+           const roleStr = String(row[3]).toUpperCase().trim();
+           let role = Role.TEACHER;
+           if (roleStr === 'ADMIN') role = Role.ADMIN;
+           else if (roleStr === 'MANAGER') role = Role.MANAGER;
+
            newUsers.push({
              id: `imported-user-${index}`,
              name: String(row[0] || 'Chưa đặt tên'),
              email: String(row[1]),
              password: String(row[2] || '123'),
-             role: (String(row[3]).toUpperCase().trim() === 'ADMIN') ? Role.ADMIN : Role.TEACHER,
+             role: role,
              subjectGroup: String(row[4] || ''),
              drawStartTime: parseDate(row[5], new Date()),
              drawEndTime: parseDate(row[6], new Date(Date.now() + 86400000)),
-             hasDrawn: false // Reset draw status on fresh sync, or we could add logic to parse it
+             hasDrawn: false 
            });
         });
       }
@@ -276,10 +302,9 @@ export const db = {
 
       db.setUsers(newUsers);
       db.setLessons(newLessons);
-      db.saveGoogleConfig(config);
+      // db.saveGoogleConfig(config); // No longer needed to save dynamically
 
       // CRITICAL: Update current session if the logged-in user was updated in this sync
-      // Since sync recreates IDs (imported-user-x), we match by Email
       const currentUserSession = db.getCurrentUser();
       if (currentUserSession) {
         const updatedUser = newUsers.find(u => u.email === currentUserSession.email);
@@ -315,7 +340,6 @@ export const db = {
     const allUsers = db.getUsers();
     
     // --- COLLISION DETECTION LOGIC V2 (Tiered) ---
-    // 1. Calculate how many times each slot (Subject + Grade + Week + Period) has been taken
     const slotUsage: Record<string, number> = {};
 
     allUsers.forEach(u => {
@@ -328,7 +352,7 @@ export const db = {
       }
     });
 
-    // 2. Filter valid candidates based on Teacher's Subject and Selected Grades
+    // Filter valid candidates
     const candidates = allLessons.filter(lesson => {
       const matchGrade = selectedGrades.includes(lesson.grade);
       const matchSubject = user.subjectGroup ? lesson.subject === user.subjectGroup : true;
@@ -339,15 +363,13 @@ export const db = {
       return null;
     }
 
-    // 3. Strategy A: Prioritize Perfectly Unique Slots (Usage = 0)
+    // Strategy A: Usage = 0
     let finalPool = candidates.filter(lesson => {
       const signature = `${lesson.subject}-${lesson.grade}-${lesson.week}-${lesson.period}`;
       return !slotUsage[signature]; // Usage is 0 or undefined
     });
 
-    // 4. Strategy B: Fallback to Low Collision Slots if no unique slots found
-    // Allow up to 2 people in the same slot (Threshold = 2)
-    // This satisfies "Trùng tiết với tỉ lệ ít vẫn duyệt được"
+    // Strategy B: Fallback
     if (finalPool.length === 0) {
       const MAX_USAGE_TOLERANCE = 2; 
       finalPool = candidates.filter(lesson => {
@@ -360,18 +382,17 @@ export const db = {
       return null;
     }
 
-    // Random selection from the best available pool
+    // Random selection
     const randomIndex = Math.floor(Math.random() * finalPool.length);
     const selectedLesson = finalPool[randomIndex];
 
-    // 5. Save state locally
+    // Save state locally
     user.hasDrawn = true;
     user.drawnLessonId = selectedLesson.id;
     db.updateUser(user);
 
-    // 6. Sync result to Google Sheet
-    const config = db.getGoogleConfig();
-    const scriptUrl = config?.scriptUrl?.trim();
+    // Sync result to Google Sheet (Always use hardcoded URL)
+    const scriptUrl = HARDCODED_SCRIPT_URL;
 
     if (scriptUrl) {
       try {
@@ -389,8 +410,7 @@ export const db = {
           },
         });
       } catch (err) {
-        // Just log internal warning, user already saw result
-        // console.warn("Failed to sync draw result to Google Sheet", err);
+        // Log warning
       }
     }
 

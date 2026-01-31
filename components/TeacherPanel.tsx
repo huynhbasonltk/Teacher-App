@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { User, Lesson } from '../types';
 import { db } from '../services/db';
 import { Clock, BookOpen, Check, AlertCircle, Sparkles, XCircle, CalendarDays } from 'lucide-react';
-import.meta.env.VITE_SCRIPT_URL;
 
 interface Props {
   user: User;

@@ -1,18 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
-import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Copy, Terminal, FileDown, Upload, AlertTriangle } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import.meta.env.VITE_SCRIPT_URL;
 
-export const AdminPanel: React.FC = () => {
+interface Props {
+  currentUser: User;
+}
+
+export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'config'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [settings, setSettings] = useState<AppSettings>({ subjects: [], grades: [] });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -22,11 +24,6 @@ export const AdminPanel: React.FC = () => {
   
   // File Input Ref for Import
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // Google Config State
-  const [googleConfig, setGoogleConfig] = useState({
-    scriptUrl: ''
-  });
 
   // New User Form State
   const [newUser, setNewUser] = useState({
@@ -41,14 +38,15 @@ export const AdminPanel: React.FC = () => {
   // Config Input State
   const [newSubject, setNewSubject] = useState('');
   const [newGrade, setNewGrade] = useState('');
+
+  // Check if current user is Super Admin
+  const isSuperAdmin = currentUser.role === Role.ADMIN;
   
   // Refresh data
   const refresh = () => {
     setUsers(db.getUsers());
     setLessons(db.getLessons());
     setSettings(db.getSettings());
-    const config = db.getGoogleConfig();
-    if (config) setGoogleConfig(config);
   };
 
   useEffect(() => {
@@ -61,16 +59,30 @@ export const AdminPanel: React.FC = () => {
     }
   }, [settings.subjects]);
 
-  const handleTimeChange = (userId: string, field: 'drawStartTime' | 'drawEndTime', value: string) => {
+  const handleTimeChange = async (userId: string, field: 'drawStartTime' | 'drawEndTime', value: string) => {
     const user = users.find(u => u.id === userId);
     if (user) {
       const updated = { ...user, [field]: value };
-      db.updateUser(updated);
+      db.updateUser(updated); // Local optimistic
       refresh();
+
+      // Sync to Google if Admin
+      if (isSuperAdmin && db.getGoogleConfig()?.scriptUrl) {
+         try {
+           await db.syncUserToGoogle(updated);
+           // Silent success or small notification
+         } catch (e) {
+           console.error("Time sync failed", e);
+         }
+      }
     }
   };
 
   const handleDeleteUser = (userId: string, userName: string) => {
+    if (!isSuperAdmin) {
+      setError("Chỉ Admin tối cao mới có quyền xóa tài khoản.");
+      return;
+    }
     if (window.confirm(`Bạn có chắc chắn muốn xóa giáo viên "${userName}" không? Hành động này không thể hoàn tác.`)) {
       try {
         db.deleteUser(userId);
@@ -82,22 +94,54 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  const getLessonName = (id?: string) => {
-    if (!id) return "Chưa bốc";
-    const l = lessons.find(lx => lx.id === id);
-    return l ? `${l.name} (${l.grade} - ${l.subject})` : "Không tìm thấy bài";
+  const handleRoleChange = async (userId: string, newRole: Role) => {
+     const user = users.find(u => u.id === userId);
+     if (!user || !isSuperAdmin) return;
+     if (user.role === newRole) return;
+
+     const roleNames = {
+        [Role.ADMIN]: 'QUẢN TRỊ VIÊN (Admin)',
+        [Role.MANAGER]: 'QUẢN LÝ (Manager)',
+        [Role.TEACHER]: 'GIÁO VIÊN'
+     };
+     
+     if (window.confirm(`Bạn muốn đổi quyền của "${user.name}" sang ${roleNames[newRole]}?`)) {
+       try {
+         const updated = { ...user, role: newRole };
+         // 1. Update Local
+         db.updateUser(updated);
+         refresh();
+         
+         // 2. Sync to Google
+         if (db.getGoogleConfig()?.scriptUrl) {
+            setSuccess("Đang đồng bộ quyền lên Google Sheet...");
+            await db.syncUserToGoogle(updated);
+            setSuccess(`Đã cập nhật và đồng bộ quyền cho ${user.name}.`);
+         } else {
+            setSuccess(`Đã cập nhật quyền cho ${user.name} (Chưa đồng bộ Sheet).`);
+         }
+       } catch (e: any) {
+         setError("Đã lưu máy nhưng lỗi đồng bộ: " + e.message);
+       }
+     } else {
+         refresh(); // revert select UI
+     }
   };
 
-  const handleSyncGoogle = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSyncGoogle = async () => {
+    if (!isSuperAdmin) {
+      setError("Bạn không có quyền đồng bộ.");
+      return;
+    }
+
     setError('');
     setSuccess('');
     setIsLoading(true);
 
     try {
-      const result = await db.syncFromGoogle(googleConfig);
+      // The URL is now hardcoded in db.ts
+      const result = await db.syncFromGoogle({ scriptUrl: '' });
       setSuccess(`Đồng bộ thành công! Đã tải ${result.userCount} giáo viên và ${result.lessonCount} bài học.`);
-      setIsConfigOpen(false);
       refresh();
     } catch (err: any) {
       setError(err.message || "Lỗi khi kết nối Google Sheet.");
@@ -108,6 +152,11 @@ export const AdminPanel: React.FC = () => {
 
   // --- EXCEL IMPORT LOGIC ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isSuperAdmin) {
+       setError("Bạn không có quyền nhập file.");
+       return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -174,13 +223,16 @@ export const AdminPanel: React.FC = () => {
             };
 
             const roleStr = String(row[3] || '').trim().toUpperCase();
+            let finalRole = Role.TEACHER;
+            if (roleStr === 'ADMIN') finalRole = Role.ADMIN;
+            else if (roleStr === 'MANAGER') finalRole = Role.MANAGER;
 
             newUsers.push({
               id: `imported-excel-user-${Date.now()}-${index}`,
               name: String(row[0]),
               email: String(row[1]),
               password: String(row[2] || '123'),
-              role: roleStr === 'ADMIN' ? Role.ADMIN : Role.TEACHER,
+              role: finalRole,
               subjectGroup: String(row[4] || ''),
               drawStartTime: parseExcelDate(row[5], new Date()),
               drawEndTime: parseExcelDate(row[6], new Date(Date.now() + 86400000)),
@@ -247,6 +299,7 @@ export const AdminPanel: React.FC = () => {
   };
 
   const handleExportExcel = () => {
+    // Managers can export
     const exportData = createExcelData(users.filter(u => u.role !== Role.ADMIN));
     
     // Create worksheet
@@ -281,41 +334,6 @@ export const AdminPanel: React.FC = () => {
     // Sanitize filename
     const safeName = user.name.replace(/[^a-z0-9\u00C0-\u1EF9]/gi, '_').toLowerCase();
     XLSX.writeFile(workbook, `ket_qua_${safeName}.xlsx`);
-  };
-
-  const handleDownloadTemplate = () => {
-    // 1. Prepare Users Sheet
-    // Added result columns so users know where data will appear
-    const usersHeader = [
-      "Tên giáo viên", "Email", "Mật khẩu", "Vai trò (ADMIN/TEACHER)", "Môn dạy", "Bắt đầu (YYYY-MM-DD HH:mm)", "Kết thúc (YYYY-MM-DD HH:mm)",
-      "Trạng thái (KQ)", "Tên bài dạy (KQ)", "Khối (KQ)", "Tuần (KQ)", "Tiết (KQ)", "Thời gian bốc (KQ)"
-    ];
-    const usersSample = [
-      ["Nguyễn Văn A", "gv1@demo.com", "123", "TEACHER", "Toán", "2024-10-20 07:00", "2024-10-25 17:00", "", "", "", "", "", ""],
-      ["Admin User", "admin@demo.com", "admin", "ADMIN", "", "", "", "", "", "", "", "", ""]
-    ];
-    const wsUsers = XLSX.utils.aoa_to_sheet([usersHeader, ...usersSample]);
-    wsUsers['!cols'] = [
-      {wch: 20}, {wch: 25}, {wch: 10}, {wch: 15}, {wch: 10}, {wch: 20}, {wch: 20},
-      {wch: 15}, {wch: 30}, {wch: 10}, {wch: 8}, {wch: 8}, {wch: 20}
-    ];
-
-    // 2. Prepare Lessons Sheet
-    const lessonsHeader = ["Môn học", "Khối lớp", "Tuần", "Tiết", "Tên bài dạy"];
-    const lessonsSample = [
-      ["Toán", "Khối 6", 1, 1, "Bài 1: Tập hợp"],
-      ["Ngữ Văn", "Khối 7", 2, 3, "Bài 2: Từ láy"]
-    ];
-    const wsLessons = XLSX.utils.aoa_to_sheet([lessonsHeader, ...lessonsSample]);
-    wsLessons['!cols'] = [{wch: 15}, {wch: 10}, {wch: 8}, {wch: 8}, {wch: 40}];
-
-    // 3. Create Workbook
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, wsUsers, "Users");
-    XLSX.utils.book_append_sheet(workbook, wsLessons, "Lessons");
-
-    // 4. Download
-    XLSX.writeFile(workbook, "mau_du_lieu_app_boc_tham.xlsx");
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -415,110 +433,6 @@ export const AdminPanel: React.FC = () => {
     }
   };
 
-  // Updated GAS Code with doPost to handle adding users AND updating results
-  const GAS_CODE = `function doGet() {
-  return handleRequest();
-}
-
-function doPost(e) {
-  return handleRequest(e);
-}
-
-function handleRequest(e) {
-  var lock = LockService.getScriptLock();
-  lock.tryLock(10000);
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var userSheet = ss.getSheetByName("Users");
-    var lessonSheet = ss.getSheetByName("Lessons");
-
-    // Handle POST (Add User OR Update Result)
-    if (e && e.postData && e.postData.contents) {
-      var data = JSON.parse(e.postData.contents);
-      
-      // Action: Add New User
-      if (data.action === 'addUser') {
-        var u = data.data;
-        userSheet.appendRow([
-          u.name, 
-          u.email, 
-          u.password, 
-          u.role, 
-          u.subjectGroup, 
-          formatDate(new Date(u.drawStartTime)), 
-          formatDate(new Date(u.drawEndTime))
-        ]);
-        return successResponse();
-      }
-
-      // Action: Update Draw Result
-      if (data.action === 'updateDraw') {
-        var email = data.email;
-        var lesson = data.lesson;
-        var timestamp = data.timestamp;
-        
-        var usersData = userSheet.getDataRange().getValues();
-        // Skip header, find row by email (index 1)
-        for (var i = 1; i < usersData.length; i++) {
-          if (usersData[i][1] === email) {
-            // Update columns H, I, J, K, L, M (1-indexed: 8,9,10,11,12,13)
-            // Note: getRange is 1-based. Row i+1 because data is 0-based but matches row i+1
-            var row = i + 1;
-            userSheet.getRange(row, 8).setValue("Đã bốc");
-            userSheet.getRange(row, 9).setValue(lesson.name);
-            userSheet.getRange(row, 10).setValue(lesson.grade);
-            userSheet.getRange(row, 11).setValue(lesson.week);
-            userSheet.getRange(row, 12).setValue(lesson.period);
-            userSheet.getRange(row, 13).setValue(formatDate(new Date(timestamp)));
-            return successResponse();
-          }
-        }
-        return errorResponse("User email not found");
-      }
-    }
-
-    // Handle GET (Read Data)
-    var users = userSheet ? userSheet.getDataRange().getValues() : [];
-    var lessons = lessonSheet ? lessonSheet.getDataRange().getValues() : [];
-
-    if (users.length > 0) users.shift(); // Remove header
-    if (lessons.length > 0) lessons.shift(); // Remove header
-
-    var result = {
-      users: users,
-      lessons: lessons
-    };
-
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-      
-  } catch (err) {
-    return errorResponse(err.toString());
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function successResponse() {
-  return ContentService.createTextOutput(JSON.stringify({result: "success"}))
-          .setMimeType(ContentService.MimeType.JSON);
-}
-
-function errorResponse(msg) {
-  return ContentService.createTextOutput(JSON.stringify({result: "error", error: msg}))
-      .setMimeType(ContentService.MimeType.JSON);
-}
-
-function formatDate(date) {
-  return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
-}`;
-
-  const copyCode = () => {
-    navigator.clipboard.writeText(GAS_CODE);
-    alert("Đã sao chép mã Script!");
-  };
-
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 relative">
       {success && (
@@ -532,25 +446,49 @@ function formatDate(date) {
         </div>
       )}
 
+      {error && (
+        <div className="border border-red-200 bg-red-100 text-red-800 px-4 py-3 rounded-lg flex items-center gap-2 animate-fade-in">
+           <AlertTriangle className="w-5 h-5" />
+           {error}
+           <button onClick={() => setError('')} className="ml-auto"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
       <header className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Quản Trị Hệ Thống</h1>
-          <p className="text-slate-500">Quản lý giáo viên, cấu hình và thời gian bốc thăm</p>
+          <p className="text-slate-500">
+            {isSuperAdmin ? "Quản lý toàn bộ hệ thống" : "Quản lý giáo viên và thời gian"}
+          </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          {/* Sync Button - LOCKED for Managers */}
           <button 
-            onClick={() => setIsConfigOpen(true)}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors"
+            onClick={() => isSuperAdmin && handleSyncGoogle()}
+            disabled={!isSuperAdmin || isLoading}
+            className={`
+              flex items-center gap-2 px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors
+              ${isSuperAdmin 
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer' 
+                : 'bg-slate-200 text-slate-400 cursor-not-allowed'}
+            `}
+            title={!isSuperAdmin ? "Bạn không có quyền đồng bộ dữ liệu" : ""}
           >
-            <Database className="w-4 h-4" />
-            Đồng bộ Sheet
+            {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+            {isLoading ? "Đang đồng bộ..." : "Đồng bộ Sheet"}
           </button>
           
           <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors"
+            onClick={() => isSuperAdmin && fileInputRef.current?.click()}
+            disabled={!isSuperAdmin}
+            className={`
+              flex items-center gap-2 border px-4 py-2.5 rounded-lg shadow-sm font-medium transition-colors
+              ${isSuperAdmin
+                ? 'bg-white border-slate-300 hover:bg-slate-50 text-slate-700'
+                : 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'}
+            `}
           >
-            <Upload className="w-4 h-4" />
+            {isSuperAdmin ? <Upload className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
             Nhập Excel
           </button>
           <input 
@@ -615,19 +553,50 @@ function formatDate(date) {
               <thead className="bg-slate-50 text-slate-700 uppercase font-medium">
                 <tr>
                   <th className="px-6 py-4">Giáo viên</th>
+                  <th className="px-6 py-4">Quyền hạn</th>
                   <th className="px-6 py-4">Môn dạy</th>
                   <th className="px-6 py-4">Khung giờ bốc thăm</th>
                   <th className="px-6 py-4">Trạng thái</th>
-                  <th className="px-6 py-4">Kết quả bốc thăm</th>
                   <th className="px-6 py-4 w-24">Hành động</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {users.filter(u => u.role !== 'ADMIN').map((user) => (
+                {users.filter(u => u.role !== Role.ADMIN).map((user) => (
                   <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-6 py-4 font-medium text-slate-900">
                       <div>{user.name}</div>
                       <div className="text-xs text-slate-400 font-normal">{user.email}</div>
+                    </td>
+                     <td className="px-6 py-4">
+                      {/* Allow Admin to change rights via Dropdown */}
+                      {isSuperAdmin ? (
+                        <div className="relative inline-block">
+                          <select
+                            value={user.role}
+                            onChange={(e) => handleRoleChange(user.id, e.target.value as Role)}
+                            className={`
+                              appearance-none pl-8 pr-8 py-1.5 rounded-lg text-xs font-bold border outline-none cursor-pointer transition-all
+                              ${user.role === Role.ADMIN ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : ''}
+                              ${user.role === Role.MANAGER ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' : ''}
+                              ${user.role === Role.TEACHER ? 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100' : ''}
+                            `}
+                          >
+                            <option value={Role.TEACHER}>Giáo viên</option>
+                            <option value={Role.MANAGER}>Quản lý</option>
+                            <option value={Role.ADMIN}>Admin</option>
+                          </select>
+                          <div className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                            {user.role === Role.ADMIN && <Shield className="w-3.5 h-3.5 text-red-600" />}
+                            {user.role === Role.MANAGER && <Shield className="w-3.5 h-3.5 text-orange-600" />}
+                            {user.role === Role.TEACHER && <UserIcon className="w-3.5 h-3.5 text-slate-500" />}
+                          </div>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none" />
+                        </div>
+                      ) : (
+                         <span className={`text-xs ${user.role === Role.MANAGER ? 'text-orange-600 font-bold' : 'text-slate-500'}`}>
+                           {user.role === Role.MANAGER ? 'Quản lý' : 'Giáo viên'}
+                         </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">{user.subjectGroup || 'N/A'}</td>
                     <td className="px-6 py-4">
@@ -665,9 +634,6 @@ function formatDate(date) {
                          </span>
                        )}
                     </td>
-                    <td className="px-6 py-4 max-w-xs truncate" title={getLessonName(user.drawnLessonId)}>
-                      {getLessonName(user.drawnLessonId)}
-                    </td>
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-1">
                         <button
@@ -677,13 +643,15 @@ function formatDate(date) {
                         >
                           <FileSpreadsheet className="w-4 h-4" />
                         </button>
-                        <button
-                          onClick={() => handleDeleteUser(user.id, user.name)}
-                          className="text-slate-400 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-50"
-                          title="Xóa giáo viên"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {isSuperAdmin && (
+                          <button
+                            onClick={() => handleDeleteUser(user.id, user.name)}
+                            className="text-slate-400 hover:text-red-600 transition-colors p-2 rounded-full hover:bg-red-50"
+                            title="Xóa giáo viên"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -783,107 +751,6 @@ function formatDate(date) {
         </div>
       )}
 
-      {/* Google Config Modal */}
-      {isConfigOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden h-auto max-h-[90vh] flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-                Kết nối Google Apps Script
-              </h3>
-              <button 
-                onClick={() => setIsConfigOpen(false)}
-                className="text-slate-400 hover:text-slate-600 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <div className="overflow-y-auto flex-1 p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
-              
-              {/* Left Column: Instructions */}
-              <div className="space-y-4 text-sm">
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 text-blue-800">
-                  <div className="flex justify-between items-start mb-2">
-                    <h4 className="font-bold flex items-center gap-2">
-                      <Terminal className="w-4 h-4" />
-                      Bước 1: Tạo Dữ Liệu
-                    </h4>
-                    <button 
-                      onClick={handleDownloadTemplate}
-                      className="flex items-center gap-1 bg-white border border-blue-200 text-blue-700 px-2 py-1 rounded text-xs hover:bg-blue-50 transition-colors"
-                      title="Tải file Excel mẫu về máy"
-                    >
-                      <FileDown className="w-3 h-3" /> Tải mẫu
-                    </button>
-                  </div>
-                  <p className="mb-2">1. Tải file mẫu ở trên về máy.</p>
-                  <p className="mb-2">2. Upload lên <strong>Google Drive</strong> và mở dưới dạng Google Sheet.</p>
-                  <p>3. Vào <strong>Tiện ích mở rộng {'>'} Apps Script</strong>.</p>
-                </div>
-
-                <div className="bg-slate-800 text-slate-200 p-4 rounded-lg font-mono text-xs overflow-auto relative group">
-                  <button 
-                    onClick={copyCode}
-                    className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 p-1.5 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                    title="Sao chép"
-                  >
-                    <Copy className="w-4 h-4" />
-                  </button>
-                  <pre>{GAS_CODE}</pre>
-                </div>
-
-                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 text-blue-800">
-                  <h4 className="font-bold mb-2">Bước 2: Triển khai (Deploy)</h4>
-                  <ol className="list-decimal pl-4 space-y-1">
-                    <li>Dán mã trên vào Script Editor.</li>
-                    <li>Nhấn nút <strong>Triển khai</strong> (Deploy) {'>'} <strong>Tùy chọn triển khai mới</strong>.</li>
-                    <li>Chọn loại: <strong>Ứng dụng web</strong> (Web app).</li>
-                    <li>Người có quyền truy cập: <strong>Bất kỳ ai</strong> (Anyone).</li>
-                    <li>Nhấn <strong>Triển khai</strong> và copy URL được cấp.</li>
-                  </ol>
-                </div>
-              </div>
-
-              {/* Right Column: Form */}
-              <div className="flex flex-col">
-                <form onSubmit={handleSyncGoogle} className="space-y-6 flex-1">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-2">Dán URL Web App vào đây:</label>
-                    <input 
-                      type="url"
-                      required
-                      placeholder="https://script.google.com/macros/s/.../exec"
-                      className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-sm"
-                      value={googleConfig.scriptUrl}
-                      onChange={(e) => setGoogleConfig({ scriptUrl: e.target.value})}
-                    />
-                    <p className="text-xs text-slate-500 mt-2">
-                      * Lưu ý: Đảm bảo Google Sheet có 2 sheet tên là <strong>Users</strong> và <strong>Lessons</strong> đúng như file mẫu.
-                    </p>
-                  </div>
-
-                  {error && (
-                    <div className="p-4 bg-red-50 text-red-600 text-sm rounded-lg border border-red-100 flex items-start gap-2">
-                      <span className="mt-0.5">⚠️</span>
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  <div className="mt-auto pt-4 flex gap-3">
-                     <button type="button" onClick={() => setIsConfigOpen(false)} className="flex-1 py-3 border border-slate-300 rounded-lg text-slate-600 font-medium hover:bg-slate-50">Đóng</button>
-                    <button type="submit" disabled={isLoading} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 shadow-lg shadow-emerald-500/30 flex justify-center items-center gap-2">
-                      {isLoading ? "Đang xử lý..." : "Lưu & Đồng bộ Ngay"}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Add Teacher Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
@@ -939,8 +806,6 @@ function formatDate(date) {
                     value={newUser.drawEndTime} onChange={(e) => setNewUser({...newUser, drawEndTime: e.target.value})} />
                 </div>
               </div>
-
-              {error && <div className="p-3 bg-red-50 text-red-600 text-sm rounded-lg">{error}</div>}
 
               <div className="pt-4 flex gap-3">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-2.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">Hủy bỏ</button>

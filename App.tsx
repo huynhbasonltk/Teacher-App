@@ -3,8 +3,8 @@ import { User, Role } from './types';
 import { db } from './services/db';
 import { AdminPanel } from './components/AdminPanel';
 import { TeacherPanel } from './components/TeacherPanel';
-import { LogOut, GraduationCap, Settings, RefreshCw, Cloud, X, Check, Database, AlertCircle } from 'lucide-react';
-import.meta.env.VITE_SCRIPT_URL;
+import { LogOut, GraduationCap, RefreshCw, Database, AlertCircle, Check, X } from 'lucide-react';
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState('');
@@ -12,77 +12,59 @@ export default function App() {
   const [error, setError] = useState('');
   
   // Data Sync State
-  const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [configUrl, setConfigUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{success: boolean, msg: string} | null>(null);
+  const [syncMessage, setSyncMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   useEffect(() => {
-    // Initialize DB (mock data)
+    // Initialize DB
     db.init();
     const currentUser = db.getCurrentUser();
     if (currentUser) setUser(currentUser);
 
-    // Auto-sync if config exists
-    const config = db.getGoogleConfig();
-    if (config?.scriptUrl) {
-      handleAutoSync(config.scriptUrl);
-    }
+    // Auto-sync on load using the hardcoded URL in db.ts
+    handleAutoSync();
   }, []);
 
-  useEffect(() => {
-    if (isConfigOpen) {
-      const config = db.getGoogleConfig();
-      if (config) setConfigUrl(config.scriptUrl);
-      setSyncResult(null);
-    }
-  }, [isConfigOpen]);
-
-  const handleAutoSync = async (url: string) => {
+  const handleAutoSync = async () => {
     setIsSyncing(true);
+    setSyncMessage(null);
     try {
-      await db.syncFromGoogle({ scriptUrl: url });
+      // Logic handles the hardcoded URL internally
+      const res = await db.syncFromGoogle({ scriptUrl: '' }); 
       console.log("Auto-sync successful");
+      
+      setSyncMessage({ type: 'success', text: `Đã cập nhật dữ liệu: ${res.userCount} GV.` });
+
+      // Clear message after 3 seconds
+      setTimeout(() => setSyncMessage(null), 3000);
       
       // REFRESH STATE: Update user UI if data changed in background sync
       const currentUser = db.getCurrentUser();
-      // We check if the current logged-in user (in state) matches the one in DB (by email)
-      // to ensure we update their permissions/times immediately.
       if (currentUser && user && currentUser.email === user.email) {
          setUser(currentUser);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error("Auto-sync failed", e);
+      // Optional: Don't show error on auto-sync to avoid annoyance, 
+      // or show it if triggered manually via the button.
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleManualSync = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!configUrl) return;
-    
+  const handleManualSyncClick = async () => {
     setIsSyncing(true);
-    setSyncResult(null);
+    setSyncMessage(null);
     try {
-      const res = await db.syncFromGoogle({ scriptUrl: configUrl });
-      setSyncResult({
-        success: true, 
-        msg: `Kết nối thành công! Đã cập nhật ${res.userCount} giáo viên.`
-      });
-      // Save valid config
-      db.saveGoogleConfig({ scriptUrl: configUrl });
+      const res = await db.syncFromGoogle({ scriptUrl: '' });
+      setSyncMessage({ type: 'success', text: `Thành công! Cập nhật ${res.userCount} GV.` });
       
-      // Update current user state if logged in
       const currentUser = db.getCurrentUser();
       if (currentUser && user && currentUser.email === user.email) {
          setUser(currentUser);
       }
-    } catch (err: any) {
-      setSyncResult({
-        success: false,
-        msg: err.message || "Lỗi kết nối. Vui lòng kiểm tra lại URL."
-      });
+    } catch (e: any) {
+      setSyncMessage({ type: 'error', text: e.message || "Lỗi kết nối Server." });
     } finally {
       setIsSyncing(false);
     }
@@ -106,27 +88,39 @@ export default function App() {
     setPassword('');
   };
 
+  // Determine if user has admin access (ADMIN or MANAGER)
+  const isAdminAccess = user && (user.role === Role.ADMIN || user.role === Role.MANAGER);
+
   if (!user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4 relative">
         
-        {/* Settings Button */}
+        {/* Sync Status Toast */}
+        {syncMessage && (
+          <div className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 text-sm font-medium animate-fade-in ${
+            syncMessage.type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' : 'bg-red-100 text-red-800 border border-red-200'
+          }`}>
+             {syncMessage.type === 'success' ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+             {syncMessage.text}
+          </div>
+        )}
+
+        {/* Sync Button - Responsive for Mobile */}
         <button 
-          onClick={() => setIsConfigOpen(true)}
-          className="absolute top-4 right-4 flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur text-slate-600 rounded-full shadow-sm hover:bg-white transition-all text-sm font-medium"
+          onClick={handleManualSyncClick}
+          disabled={isSyncing}
+          className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-2 sm:px-4 sm:py-2 bg-white/90 backdrop-blur text-slate-600 rounded-full shadow-md hover:bg-blue-50 hover:text-blue-600 transition-all text-sm font-medium disabled:opacity-70 disabled:cursor-not-allowed"
+          title="Làm mới dữ liệu từ Server"
         >
-          {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin text-blue-600" /> : <Database className="w-4 h-4" />}
-          <span>Kết nối dữ liệu</span>
+          {isSyncing ? <RefreshCw className="w-5 h-5 animate-spin text-blue-600" /> : <Database className="w-5 h-5" />}
+          <span className="hidden sm:inline">{isSyncing ? "Đang tải..." : "Cập nhật dữ liệu"}</span>
         </button>
 
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 relative">
           <div className="text-center mb-8">
             {/* Logo Section */}
             <div className="flex flex-col items-center justify-center mb-6">
-              <div className="w-28 h-28 mb-3 relative flex items-center justify-center">
-                 {/* Image Logo - Defaulting to ./logo.png. 
-                     Use onError to fallback if image is missing 
-                 */}
+              <div className="w-24 h-24 sm:w-28 sm:h-28 mb-3 relative flex items-center justify-center">
                  <img 
                    src="./logo.png" 
                    onError={(e) => {
@@ -149,14 +143,14 @@ export default function App() {
                  </div>
               </div>
               
-              <h2 className="text-xl font-bold text-blue-900 uppercase tracking-wide leading-tight">
+              <h2 className="text-lg sm:text-xl font-bold text-blue-900 uppercase tracking-wide leading-tight">
                 Trường THCS<br/>Lý Thường Kiệt
               </h2>
               <div className="w-16 h-1 bg-blue-500 rounded-full my-3"></div>
-              <p className="text-slate-500 font-medium">Hội Thi Giáo Viên Dạy Giỏi</p>
+              <p className="text-slate-500 font-medium text-sm sm:text-base">Hội Thi Giáo Viên Dạy Giỏi</p>
             </div>
             
-            <h1 className="text-sm font-semibold text-slate-400 uppercase tracking-widest">Cổng Đăng Nhập</h1>
+            <h1 className="text-xs sm:text-sm font-semibold text-slate-400 uppercase tracking-widest">Cổng Đăng Nhập</h1>
           </div>
           
           <form onSubmit={handleLogin} className="space-y-6">
@@ -203,60 +197,6 @@ export default function App() {
             </div>
           </form>
         </div>
-
-        {/* Config Modal */}
-        {isConfigOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
-                  <Database className="w-5 h-5 text-blue-600" />
-                  Kết nối Google Sheet
-                </h3>
-                <button onClick={() => setIsConfigOpen(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-              </div>
-              
-              <form onSubmit={handleManualSync} className="p-6 space-y-4">
-                <div className="text-sm text-slate-600 mb-4 bg-blue-50 p-4 rounded-lg">
-                   Nhập đường dẫn <strong>Google Apps Script Web App</strong> để đồng bộ danh sách giáo viên và ngân hàng đề thi về thiết bị này.
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Web App URL</label>
-                  <div className="relative">
-                    <Cloud className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
-                    <input 
-                      type="url"
-                      required
-                      placeholder="https://script.google.com/macros/s/..."
-                      className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs"
-                      value={configUrl}
-                      onChange={(e) => setConfigUrl(e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                {syncResult && (
-                  <div className={`p-3 rounded-lg text-sm flex items-start gap-2 ${syncResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
-                    {syncResult.success ? <Check className="w-4 h-4 mt-0.5" /> : <X className="w-4 h-4 mt-0.5" />}
-                    {syncResult.msg}
-                  </div>
-                )}
-
-                <div className="pt-2 flex gap-3">
-                  <button type="button" onClick={() => setIsConfigOpen(false)} className="flex-1 py-2.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 font-medium">Đóng</button>
-                  <button type="submit" disabled={isSyncing} className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-lg flex justify-center items-center gap-2 font-medium">
-                    {isSyncing ? (
-                      <><RefreshCw className="w-4 h-4 animate-spin" /> Đang đồng bộ...</>
-                    ) : (
-                      "Lưu & Đồng bộ"
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -272,14 +212,18 @@ export default function App() {
                 <GraduationCap className="text-blue-600 w-6 h-6 hidden" /> 
               </div>
               <div className="flex flex-col">
-                 <span className="font-bold text-sm text-blue-900 uppercase leading-none">THCS Lý Thường Kiệt</span>
-                 <span className="text-xs text-slate-500">Hội Thi GVDG</span>
+                 <span className="font-bold text-xs sm:text-sm text-blue-900 uppercase leading-none">THCS Lý Thường Kiệt</span>
+                 <span className="text-[10px] sm:text-xs text-slate-500">Hội Thi GVDG</span>
               </div>
             </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right hidden sm:block">
-                <p className="text-sm font-medium text-slate-800">{user.name}</p>
-                <p className="text-xs text-slate-500">{user.role === Role.ADMIN ? 'Quản trị viên' : 'Giáo viên'}</p>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-sm font-medium text-slate-800 max-w-[120px] sm:max-w-none truncate">{user.name}</p>
+                <div className="flex items-center justify-end gap-1 text-xs text-slate-500">
+                  {user.role === Role.ADMIN && <span className="text-red-600 font-bold">Admin</span>}
+                  {user.role === Role.MANAGER && <span className="text-orange-600 font-bold">Quản lý</span>}
+                  {user.role === Role.TEACHER && <span className="hidden sm:inline">Giáo viên</span>}
+                </div>
               </div>
               <button
                 onClick={handleLogout}
@@ -294,8 +238,8 @@ export default function App() {
       </nav>
 
       <main className="flex-grow">
-        {user.role === Role.ADMIN ? (
-          <AdminPanel />
+        {isAdminAccess ? (
+          <AdminPanel currentUser={user} />
         ) : (
           <TeacherPanel user={user} onUpdateUser={setUser} />
         )}

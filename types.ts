@@ -1,6 +1,7 @@
 export enum Role {
-  ADMIN = 'ADMIN',
-  TEACHER = 'TEACHER'
+  ADMIN = 'ADMIN',     // Quản trị viên tối cao (Full quyền + Đồng bộ)
+  MANAGER = 'MANAGER', // Quản lý (Vào được AdminPanel nhưng không được Đồng bộ)
+  TEACHER = 'TEACHER'  // Giáo viên (Chỉ vào TeacherPanel)
 }
 
 export interface Lesson {
