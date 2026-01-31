@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import.meta.env.VITE_SCRIPT_URL;
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
