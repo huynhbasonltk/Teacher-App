@@ -1,4 +1,5 @@
 import { Lesson, User, Role, GoogleConfig, AppSettings } from '../types';
+import.meta.env.VITE_SCRIPT_URL
 
 const DEFAULT_SUBJECTS = ["Toán", "Khoa học tự nhiên", "Lịch sử và Địa lí", "Tin Học", "Ngữ Văn", "Mĩ thuật", "Âm nhạc", "Tiếng Anh", "GDCD", "Giáo dục thể chất","Công nghệ", "HĐTN-HN"];
 const DEFAULT_GRADES = ["Khối 6", "Khối 7", "Khối 8", "Khối 9"];
