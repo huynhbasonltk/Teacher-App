@@ -3,6 +3,7 @@ import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
 import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Copy, Terminal, FileDown, Upload, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import.meta.env.VITE_SCRIPT_URL;
 
 export const AdminPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'users' | 'config'>('users');
