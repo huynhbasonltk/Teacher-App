@@ -1,10 +1,20 @@
-import { Lesson, User, Role, GoogleConfig, AppSettings } from '../types';
+
+import { Lesson, User, Role, GoogleConfig, AppSettings, ClassItem } from '../types';
 
 const DEFAULT_SUBJECTS = ["Toán", "Khoa học tự nhiên", "Lịch sử & Địa lí", "Tin Học", "Ngữ Văn", "Mĩ thuật", "Âm nhạc", "Tiếng Anh", "GDCD", "Giáo dục thể chất","Công nghệ", "HĐTN-HN"];
 const DEFAULT_GRADES = ["Khối 6", "Khối 7", "Khối 8", "Khối 9"];
 
+// Default Classes
+const SEED_CLASSES: ClassItem[] = [
+  { id: 'c-6a1', grade: 'Khối 6', name: '6A1' },
+  { id: 'c-6a2', grade: 'Khối 6', name: '6A2' },
+  { id: 'c-7a1', grade: 'Khối 7', name: '7A1' },
+  { id: 'c-8a1', grade: 'Khối 8', name: '8A1' },
+  { id: 'c-9a1', grade: 'Khối 9', name: '9A1' },
+];
+
 // Hardcoded Script URL provided by user
-const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxj0mSYiaZKKL7yIZrTjPdBi5lt0euBkGBbtP6jTpz0QZuJRH-V7hSFhCZVviouYqMA9Q/exec";
+const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhkb_zgJL43J4SFz_pY8rAG7yO_r6y1ADTrbwJQbGYXDutGaNJPj4LAAY09pHCE5Nr/exec";
 
 // Seed data to simulate Google Sheet import and Admin setup
 const SEED_LESSONS: Lesson[] = Array.from({ length: 50 }).map((_, i) => ({
@@ -72,16 +82,26 @@ export const db = {
     if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
       const defaultSettings: AppSettings = {
         subjects: DEFAULT_SUBJECTS,
-        grades: DEFAULT_GRADES
+        grades: DEFAULT_GRADES,
+        classes: SEED_CLASSES
       };
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(defaultSettings));
+    } else {
+      // Migration for existing data without classes
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEYS.SETTINGS) || '{}');
+      if (!s.classes) {
+        s.classes = SEED_CLASSES;
+        localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(s));
+      }
     }
     // Always save the hardcoded config on init to ensure consistency
     db.saveGoogleConfig({ scriptUrl: HARDCODED_SCRIPT_URL });
   },
 
   getSettings: (): AppSettings => {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.SETTINGS) || '{}');
+    const s = JSON.parse(localStorage.getItem(STORAGE_KEYS.SETTINGS) || '{}');
+    if (!s.classes) s.classes = [];
+    return s;
   },
 
   saveSettings: (settings: AppSettings) => {
@@ -218,7 +238,7 @@ export const db = {
   },
 
   // Sync Data from Google Apps Script Web App
-  syncFromGoogle: async (config: GoogleConfig): Promise<{ userCount: number, lessonCount: number }> => {
+  syncFromGoogle: async (config: GoogleConfig): Promise<{ userCount: number, lessonCount: number, classCount: number }> => {
     const scriptUrl = HARDCODED_SCRIPT_URL; // Force usage
 
     if (!scriptUrl) throw new Error("Lỗi cấu hình hệ thống (Thiếu Script URL).");
@@ -236,7 +256,36 @@ export const db = {
         throw new Error("Dữ liệu trả về không đúng định dạng (thiếu 'users' hoặc 'lessons').");
       }
 
-      // Process Users
+      // 1. Process Lessons First (so we can link drawn lessons to users)
+      const newLessons: Lesson[] = [];
+      if (Array.isArray(data.lessons)) {
+        data.lessons.forEach((row: any[], index: number) => {
+          if (!row || row.length < 5) return;
+          newLessons.push({
+            id: `imported-lesson-${index}`,
+            subject: String(row[0]),
+            grade: String(row[1]),
+            week: parseInt(row[2]) || 1,
+            period: parseInt(row[3]) || 1,
+            name: String(row[4])
+          });
+        });
+      }
+
+      // 2. Process Classes
+      const newClasses: ClassItem[] = [];
+      if (data.classes && Array.isArray(data.classes)) {
+         data.classes.forEach((row: any[], index: number) => {
+            if (!row || row.length < 2) return;
+            newClasses.push({
+               id: `imported-class-${index}`,
+               grade: String(row[0]).trim(),
+               name: String(row[1]).trim()
+            });
+         });
+      }
+
+      // 3. Process Users and Link Draw Status
       const newUsers: User[] = [];
       if (Array.isArray(data.users)) {
         data.users.forEach((row: any[], index: number) => {
@@ -253,6 +302,39 @@ export const db = {
            if (roleStr === 'ADMIN') role = Role.ADMIN;
            else if (roleStr === 'MANAGER') role = Role.MANAGER;
 
+           // Sheet Columns (0-based index in array):
+           // 0:Name, 1:Email, 2:Pass, 3:Role, 4:Subject, 5:Start, 6:End, 
+           // 7:Status(H), 8:Sub(I), 9:Grd(J), 10:LesName(K), 11:Cls(L), 12:Wk(M), 13:Per(N), 14:Time(O)
+           
+           const hasDrawnRaw = String(row[7] || '').toUpperCase();
+           const hasDrawn = hasDrawnRaw === 'TRUE' || hasDrawnRaw === 'ĐÃ BỐC' || hasDrawnRaw === 'YES';
+           let drawnClass = '';
+           let drawnLessonId = undefined;
+
+           if (hasDrawn) {
+             drawnClass = String(row[11] || ''); // Col L
+             
+             // Try to find the matching lesson object to set ID
+             const lSubject = String(row[8] || '');
+             const lGrade = String(row[9] || '');
+             const lName = String(row[10] || '');
+             const lWeek = parseInt(row[12]);
+             const lPeriod = parseInt(row[13]);
+             
+             // Find match in newLessons
+             const foundLesson = newLessons.find(l => 
+                l.subject === lSubject &&
+                l.grade === lGrade &&
+                l.name === lName &&
+                l.week === lWeek &&
+                l.period === lPeriod
+             );
+             
+             if (foundLesson) {
+               drawnLessonId = foundLesson.id;
+             }
+           }
+
            newUsers.push({
              id: `imported-user-${index}`,
              name: String(row[0] || 'Chưa đặt tên'),
@@ -262,24 +344,10 @@ export const db = {
              subjectGroup: String(row[4] || ''),
              drawStartTime: parseDate(row[5], new Date()),
              drawEndTime: parseDate(row[6], new Date(Date.now() + 86400000)),
-             hasDrawn: false 
+             hasDrawn: hasDrawn,
+             drawnClass: drawnClass,
+             drawnLessonId: drawnLessonId
            });
-        });
-      }
-
-      // Process Lessons
-      const newLessons: Lesson[] = [];
-      if (Array.isArray(data.lessons)) {
-        data.lessons.forEach((row: any[], index: number) => {
-          if (!row || row.length < 5) return;
-          newLessons.push({
-            id: `imported-lesson-${index}`,
-            subject: String(row[0]),
-            grade: String(row[1]),
-            week: parseInt(row[2]) || 1,
-            period: parseInt(row[3]) || 1,
-            name: String(row[4])
-          });
         });
       }
 
@@ -302,7 +370,14 @@ export const db = {
 
       db.setUsers(newUsers);
       db.setLessons(newLessons);
-      // db.saveGoogleConfig(config); // No longer needed to save dynamically
+      
+      // Update Settings with new Classes
+      const currentSettings = db.getSettings();
+      // If we got classes from Google, overwrite local. If empty, keep local or empty.
+      if (newClasses.length > 0) {
+          currentSettings.classes = newClasses;
+          db.saveSettings(currentSettings);
+      }
 
       // CRITICAL: Update current session if the logged-in user was updated in this sync
       const currentUserSession = db.getCurrentUser();
@@ -313,7 +388,7 @@ export const db = {
         }
       }
 
-      return { userCount: newUsers.length, lessonCount: newLessons.length };
+      return { userCount: newUsers.length, lessonCount: newLessons.length, classCount: newClasses.length };
 
     } catch (error: any) {
       console.error("Sync Error:", error);
@@ -329,6 +404,7 @@ export const db = {
     // Reset local state
     user.hasDrawn = false;
     delete user.drawnLessonId; // Clear the ID
+    delete user.drawnClass;    // Clear the Class
     db.updateUser(user);
 
     // Sync to Google
@@ -338,7 +414,7 @@ export const db = {
   },
 
   // Core Logic: Random Draw (Async for Google Sync)
-  drawLesson: async (teacherId: string, selectedGrades: string[]): Promise<Lesson | null> => {
+  drawLesson: async (teacherId: string, selectedGrades: string[]): Promise<{ lesson: Lesson, className: string } | null> => {
     const user = db.getUsers().find(u => u.id === teacherId);
     if (!user) throw new Error("User not found");
     if (user.hasDrawn) throw new Error("Giáo viên đã bốc thăm rồi.");
@@ -354,6 +430,8 @@ export const db = {
 
     const allLessons = db.getLessons();
     const allUsers = db.getUsers();
+    const settings = db.getSettings();
+    const allClasses = settings.classes || [];
     
     // --- COLLISION DETECTION LOGIC V2 (Tiered) ---
     const slotUsage: Record<string, number> = {};
@@ -398,13 +476,27 @@ export const db = {
       return null;
     }
 
-    // Random selection
+    // Random selection of Lesson
     const randomIndex = Math.floor(Math.random() * finalPool.length);
     const selectedLesson = finalPool[randomIndex];
+
+    // --- RANDOM CLASS SELECTION LOGIC ---
+    // Rule: Pick a random class from the grade of the SELECTED lesson.
+    // If the lesson is for "Khối 6", pick a random class from "Khối 6".
+    const validClasses = allClasses.filter(c => c.grade === selectedLesson.grade);
+    let selectedClassName = '';
+    
+    if (validClasses.length > 0) {
+        const randomClassIndex = Math.floor(Math.random() * validClasses.length);
+        selectedClassName = validClasses[randomClassIndex].name;
+    } else {
+        selectedClassName = 'Chưa xếp lớp'; // Fallback if no classes configured for this grade
+    }
 
     // Save state locally
     user.hasDrawn = true;
     user.drawnLessonId = selectedLesson.id;
+    user.drawnClass = selectedClassName;
     db.updateUser(user);
 
     // Sync result to Google Sheet (Always use hardcoded URL)
@@ -418,8 +510,12 @@ export const db = {
           body: JSON.stringify({
             action: 'updateDraw',
             email: user.email,
-            lesson: selectedLesson,
-            timestamp: now.toISOString()
+            lesson: {
+              ...selectedLesson,
+              week: selectedLesson.week || 0 // Explicitly sending week to ensure sheet column M is updated
+            },
+            className: selectedClassName, // Send Class
+            timestamp: now.toLocaleString('vi-VN') // Send formatted time string for Sheet Column O
           }),
           headers: {
             'Content-Type': 'text/plain;charset=utf-8',
@@ -430,6 +526,6 @@ export const db = {
       }
     }
 
-    return selectedLesson;
+    return { lesson: selectedLesson, className: selectedClassName };
   }
 };

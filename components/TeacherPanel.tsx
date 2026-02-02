@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, Lesson } from '../types';
 import { db } from '../services/db';
@@ -86,10 +87,10 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
       const resultPromise = db.drawLesson(user.id, selectedGrades);
       const minDelay = new Promise(resolve => setTimeout(resolve, 2000));
       
-      const [lesson] = await Promise.all([resultPromise, minDelay]);
+      const [data] = await Promise.all([resultPromise, minDelay]);
 
-      if (lesson) {
-        setResult(lesson);
+      if (data && data.lesson) {
+        setResult(data.lesson);
         // Update parent state
         const updatedUser = db.getCurrentUser();
         if (updatedUser) onUpdateUser(updatedUser);
@@ -210,7 +211,14 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
               </div>
               <div>
                 <span className="text-xs text-slate-400 uppercase tracking-wide">Khối lớp</span>
-                <p className="font-semibold text-slate-800">{result.grade}</p>
+                <div className="flex items-center gap-2">
+                    <p className="font-semibold text-slate-800">{result.grade}</p>
+                    {user.drawnClass && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold border border-blue-200">
+                            Lớp: {user.drawnClass}
+                        </span>
+                    )}
+                </div>
               </div>
               <div>
                 <span className="text-xs text-slate-400 uppercase tracking-wide">Tuần / Tiết</span>

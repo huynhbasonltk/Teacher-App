@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
-import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw, RotateCcw } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw, RotateCcw, Home } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -12,7 +13,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'users' | 'config'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [settings, setSettings] = useState<AppSettings>({ subjects: [], grades: [] });
+  const [settings, setSettings] = useState<AppSettings>({ subjects: [], grades: [], classes: [] });
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [error, setError] = useState('');
@@ -38,6 +39,10 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
   // Config Input State
   const [newSubject, setNewSubject] = useState('');
   const [newGrade, setNewGrade] = useState('');
+  
+  // Class Config State
+  const [selectedGradeForClass, setSelectedGradeForClass] = useState('');
+  const [newClassName, setNewClassName] = useState('');
 
   // Check if current user is Super Admin
   const isSuperAdmin = currentUser.role === Role.ADMIN;
@@ -58,6 +63,13 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
       setNewUser(prev => ({ ...prev, subjectGroup: settings.subjects[0] }));
     }
   }, [settings.subjects]);
+  
+  // Auto-select first grade for class management if available
+  useEffect(() => {
+    if (settings.grades.length > 0 && !selectedGradeForClass) {
+        setSelectedGradeForClass(settings.grades[0]);
+    }
+  }, [settings.grades]);
 
   const handleTimeChange = async (userId: string, field: 'drawStartTime' | 'drawEndTime', value: string) => {
     const user = users.find(u => u.id === userId);
@@ -157,7 +169,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
     try {
       // The URL is now hardcoded in db.ts
       const result = await db.syncFromGoogle({ scriptUrl: '' });
-      setSuccess(`Đồng bộ thành công! Đã tải ${result.userCount} giáo viên và ${result.lessonCount} bài học.`);
+      setSuccess(`Đồng bộ thành công! Đã tải ${result.userCount} giáo viên, ${result.lessonCount} bài học và ${result.classCount || 0} lớp.`);
       refresh();
     } catch (err: any) {
       setError(err.message || "Lỗi khi kết nối Google Sheet.");
@@ -252,7 +264,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
               subjectGroup: String(row[4] || ''),
               drawStartTime: parseExcelDate(row[5], new Date()),
               drawEndTime: parseExcelDate(row[6], new Date(Date.now() + 86400000)),
-              hasDrawn: false 
+              hasDrawn: false,
+              drawnClass: ''
             });
          });
 
@@ -308,6 +321,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
         "Trạng thái": u.hasDrawn ? "Đã bốc" : "Chưa bốc",
         "Tên Bài Dạy": l ? l.name : '',
         "Khối": l ? l.grade : '',
+        "Lớp dạy": u.drawnClass || '', // ADDED CLASS COLUMN
         "Tuần": l ? l.week : '',
         "Tiết": l ? l.period : ''
       };
@@ -323,7 +337,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
     
     // Auto-width for columns (simple approximation)
     const wscols = [
-      {wch: 20}, {wch: 25}, {wch: 15}, {wch: 20}, {wch: 20}, {wch: 10}, {wch: 40}, {wch: 10}, {wch: 8}, {wch: 8}
+      {wch: 20}, {wch: 25}, {wch: 15}, {wch: 20}, {wch: 20}, {wch: 10}, {wch: 40}, {wch: 10}, {wch: 10}, {wch: 8}, {wch: 8}
     ];
     worksheet['!cols'] = wscols;
 
@@ -340,7 +354,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const wscols = [
-      {wch: 20}, {wch: 25}, {wch: 15}, {wch: 20}, {wch: 20}, {wch: 10}, {wch: 40}, {wch: 10}, {wch: 8}, {wch: 8}
+      {wch: 20}, {wch: 25}, {wch: 15}, {wch: 20}, {wch: 20}, {wch: 10}, {wch: 40}, {wch: 10}, {wch: 10}, {wch: 8}, {wch: 8}
     ];
     worksheet['!cols'] = wscols;
 
@@ -437,15 +451,48 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
       newSettings.subjects = newSettings.subjects.filter(s => s !== value);
     } else {
       newSettings.grades = newSettings.grades.filter(g => g !== value);
+      // Remove classes associated with this grade
+      if (newSettings.classes) {
+          newSettings.classes = newSettings.classes.filter(c => c.grade !== value);
+      }
     }
     db.saveSettings(newSettings);
     refresh();
   };
+  
+  // Class Management Logic
+  const handleAddClass = () => {
+     if (!selectedGradeForClass || !newClassName.trim()) return;
+     
+     const newSettings = { ...settings };
+     if (!newSettings.classes) newSettings.classes = [];
+     
+     // Check dupes
+     const exists = newSettings.classes.some(c => c.grade === selectedGradeForClass && c.name === newClassName.trim());
+     if (!exists) {
+         newSettings.classes.push({
+             id: `c-${Date.now()}`,
+             grade: selectedGradeForClass,
+             name: newClassName.trim()
+         });
+         db.saveSettings(newSettings);
+         setNewClassName('');
+         refresh();
+     }
+  };
+  
+  const handleRemoveClass = (classId: string) => {
+      const newSettings = { ...settings };
+      newSettings.classes = newSettings.classes.filter(c => c.id !== classId);
+      db.saveSettings(newSettings);
+      refresh();
+  };
 
-  const handleKeyDown = (e: React.KeyboardEvent, type: 'subject' | 'grade') => {
+  const handleKeyDown = (e: React.KeyboardEvent, type: 'subject' | 'grade' | 'class') => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleAddConfig(type);
+      if (type === 'class') handleAddClass();
+      else handleAddConfig(type);
     }
   };
 
@@ -557,7 +604,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
             `}
           >
             <Settings className="w-4 h-4" />
-            Cấu hình chung (Môn/Khối)
+            Cấu hình chung (Môn/Khối/Lớp)
           </button>
         </nav>
       </div>
@@ -691,7 +738,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {/* Subjects Config */}
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
@@ -770,6 +817,72 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
               ))}
               {settings.grades.length === 0 && (
                 <li className="text-center text-slate-400 py-4 text-sm">Chưa có khối lớp nào.</li>
+              )}
+            </ul>
+          </div>
+
+          {/* Classes Config (New) */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
+              <Home className="w-5 h-5 text-green-500" />
+              Quản lý Lớp học
+            </h3>
+            
+            <div className="mb-4">
+                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Chọn khối lớp</label>
+                <select 
+                    value={selectedGradeForClass} 
+                    onChange={(e) => setSelectedGradeForClass(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                >
+                    <option value="">-- Chọn khối --</option>
+                    {settings.grades.map(g => (
+                        <option key={g} value={g}>{g}</option>
+                    ))}
+                </select>
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder={selectedGradeForClass ? "Nhập tên lớp (VD: 6A1)..." : "Vui lòng chọn khối trước"}
+                className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none"
+                value={newClassName}
+                onChange={(e) => setNewClassName(e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, 'class')}
+                disabled={!selectedGradeForClass}
+              />
+              <button
+                onClick={handleAddClass}
+                disabled={!selectedGradeForClass}
+                className={`
+                    px-4 py-2 rounded-lg text-sm font-medium transition-colors
+                    ${!selectedGradeForClass ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-green-600 text-white hover:bg-green-700'}
+                `}
+              >
+                Thêm
+              </button>
+            </div>
+
+            <ul className="space-y-2 max-h-80 overflow-y-auto">
+              {selectedGradeForClass ? (
+                 (settings.classes || []).filter(c => c.grade === selectedGradeForClass).map((c, idx) => (
+                    <li key={idx} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100 group hover:border-green-100 hover:bg-green-50/30 transition-colors">
+                      <span className="text-slate-700 font-medium">{c.name}</span>
+                      <button
+                        onClick={() => handleRemoveClass(c.id)}
+                        className="text-slate-400 hover:text-red-500 transition-colors p-1 rounded-md hover:bg-red-50"
+                        title="Xóa lớp"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </li>
+                 ))
+              ) : (
+                <li className="text-center text-slate-400 py-4 text-sm">Chọn khối để xem danh sách lớp.</li>
+              )}
+              {selectedGradeForClass && (settings.classes || []).filter(c => c.grade === selectedGradeForClass).length === 0 && (
+                <li className="text-center text-slate-400 py-4 text-sm">Khối này chưa có lớp nào.</li>
               )}
             </ul>
           </div>

@@ -1,3 +1,4 @@
+
 export enum Role {
   ADMIN = 'ADMIN',     // Quản trị viên tối cao (Full quyền + Đồng bộ)
   MANAGER = 'MANAGER', // Quản lý (Vào được AdminPanel nhưng không được Đồng bộ)
@@ -13,6 +14,12 @@ export interface Lesson {
   name: string;    // Tên bài
 }
 
+export interface ClassItem {
+  id: string;
+  grade: string; // Links to Lesson.grade
+  name: string;  // e.g. 6A1, 9A2
+}
+
 export interface User {
   id: string;
   email: string;
@@ -23,6 +30,7 @@ export interface User {
   drawEndTime: string;   // ISO Date string
   hasDrawn: boolean;
   drawnLessonId?: string;
+  drawnClass?: string;   // New: The random class assigned
   subjectGroup?: string; // Môn giảng dạy
 }
 
@@ -38,4 +46,5 @@ export interface GoogleConfig {
 export interface AppSettings {
   subjects: string[];
   grades: string[];
+  classes: ClassItem[];
 }
