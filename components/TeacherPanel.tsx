@@ -17,36 +17,13 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const [result, setResult] = useState<Lesson | null>(null);
   const [availableGrades, setAvailableGrades] = useState<string[]>([]);
 
-  // --- IMPROVED DATE PARSING ---
-  // Ensures data from Google Sheet is always treated as LOCAL Time (Wall Clock)
-  // regardless of whether it has 'Z' (UTC) or spaces.
-  const parseToLocal = (dateStr: string): Date => {
-      if (!dateStr) return new Date();
-      
-      // 1. Replace space with T (e.g., "2024-01-01 08:00" -> "2024-01-01T08:00")
-      // This fixes issues on Safari/iOS
-      let cleanStr = dateStr.trim().replace(' ', 'T');
-      
-      // 2. Remove 'Z' or timezone offsets (e.g. +07:00) 
-      // This forces the browser to interpret "08:00" as "08:00 AM Here", not "08:00 UTC"
-      cleanStr = cleanStr.split('Z')[0].split('+')[0];
-
-      const d = new Date(cleanStr);
-      
-      // If Invalid Date (e.g. format DD/MM/YYYY), return safe fallback or current time to prevent crash
-      if (isNaN(d.getTime())) {
-          return new Date(); 
-      }
-      return d;
-  };
-
-  const startTime = parseToLocal(user.drawStartTime);
-  const endTime = parseToLocal(user.drawEndTime);
+  // Since db.ts now guarantees drawStartTime is "YYYY-MM-DDTHH:mm" (Local ISO),
+  // new Date() will correctly interpret this as Local Time on the device.
+  const startTime = new Date(user.drawStartTime);
+  const endTime = new Date(user.drawEndTime);
   
   const isTooEarly = now < startTime;
   const isTooLate = now > endTime;
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const canEnter = !isTooEarly && !isTooLate;
   
   // Check if user subject requires 2 grades
   const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc"];
@@ -78,7 +55,6 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const toggleGrade = (grade: string) => {
     if (selectedGrades.includes(grade)) {
       setSelectedGrades(prev => prev.filter(g => g !== grade));
-      // Clear error if related to selection limit
       if (error && error.includes("tối đa")) setError(null);
     } else {
       if (selectedGrades.length >= 2) {
@@ -106,15 +82,12 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
     setIsDrawing(true);
 
     try {
-      // Small artificial delay for effect, but now primarily waiting for network
       const resultPromise = db.drawLesson(user.id, selectedGrades);
       const minDelay = new Promise(resolve => setTimeout(resolve, 2000));
-      
       const [data] = await Promise.all([resultPromise, minDelay]);
 
       if (data && data.lesson) {
         setResult(data.lesson);
-        // Update parent state
         const updatedUser = db.getCurrentUser();
         if (updatedUser) onUpdateUser(updatedUser);
       } else {
@@ -128,6 +101,7 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   };
 
   const formatDate = (date: Date) => {
+    if (isNaN(date.getTime())) return "N/A";
     return date.toLocaleString('vi-VN', { 
       year: 'numeric', 
       month: 'numeric', 
@@ -218,7 +192,6 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
         </div>
       </header>
 
-      {/* Result Card */}
       {result ? (
         <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-8 text-center shadow-lg relative overflow-hidden animate-fade-in">
           <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-green-400 to-emerald-500"></div>
