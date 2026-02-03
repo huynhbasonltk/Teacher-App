@@ -14,7 +14,7 @@ const SEED_CLASSES: ClassItem[] = [
 ];
 
 // Hardcoded Script URL provided by user
-const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhkb_zgJL43J4SFz_pY8rAG7yO_r6y1ADTrbwJQbGYXDutGaNJPj4LAAY09pHCE5Nr/exec";
+const HARDCODED_SCRIPT_URL = "";
 
 // Seed data to simulate Google Sheet import and Admin setup
 const SEED_LESSONS: Lesson[] = Array.from({ length: 50 }).map((_, i) => ({
