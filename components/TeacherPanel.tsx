@@ -17,8 +17,31 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const [result, setResult] = useState<Lesson | null>(null);
   const [availableGrades, setAvailableGrades] = useState<string[]>([]);
 
-  const startTime = new Date(user.drawStartTime);
-  const endTime = new Date(user.drawEndTime);
+  // --- IMPROVED DATE PARSING ---
+  // Ensures data from Google Sheet is always treated as LOCAL Time (Wall Clock)
+  // regardless of whether it has 'Z' (UTC) or spaces.
+  const parseToLocal = (dateStr: string): Date => {
+      if (!dateStr) return new Date();
+      
+      // 1. Replace space with T (e.g., "2024-01-01 08:00" -> "2024-01-01T08:00")
+      // This fixes issues on Safari/iOS
+      let cleanStr = dateStr.trim().replace(' ', 'T');
+      
+      // 2. Remove 'Z' or timezone offsets (e.g. +07:00) 
+      // This forces the browser to interpret "08:00" as "08:00 AM Here", not "08:00 UTC"
+      cleanStr = cleanStr.split('Z')[0].split('+')[0];
+
+      const d = new Date(cleanStr);
+      
+      // If Invalid Date (e.g. format DD/MM/YYYY), return safe fallback or current time to prevent crash
+      if (isNaN(d.getTime())) {
+          return new Date(); 
+      }
+      return d;
+  };
+
+  const startTime = parseToLocal(user.drawStartTime);
+  const endTime = parseToLocal(user.drawEndTime);
   
   const isTooEarly = now < startTime;
   const isTooLate = now > endTime;
