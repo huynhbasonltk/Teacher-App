@@ -26,7 +26,7 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const isTooLate = now > endTime;
   
   // Check if user subject requires 2 grades
-  const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc","Toán", "Ngữ văn", "Tiếng anh", "Khoa học tự nhiên", "Lịch sử và địa lí", "Giáo dục thể chất"];
+  const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc","Toán", "Ngữ văn", "Tiếng anh", "Khoa học tự nhiên", "Lịch sử và địa lý", "Giáo dục thể chất"];
   const userSubject = user.subjectGroup?.trim() || "";
   const isSpecialSubject = specialSubjects.some(s => s.toLowerCase() === userSubject.toLowerCase());
   
