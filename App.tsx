@@ -212,7 +212,7 @@ export default function App() {
                 <GraduationCap className="text-blue-600 w-6 h-6 hidden" /> 
               </div>
               <div className="flex flex-col">
-                 <span className="font-bold text-xs sm:text-sm text-blue-900 uppercase leading-none">THCS Lý Thường Kiệt</span>
+                 <span className="font-bold text-xs sm:text-sm text-blue-900 uppercase leading-none">Trường THCS Lý Thường Kiệt</span>
                  <span className="text-[10px] sm:text-xs text-slate-500">Hội Thi GVDG</span>
               </div>
             </div>
@@ -247,7 +247,7 @@ export default function App() {
       
       <footer className="bg-white border-t border-slate-200 py-6 mt-8">
         <div className="max-w-7xl mx-auto px-6 text-center text-slate-500 text-sm font-medium">
-          Copyright Huỳnh Bá Sơn
+          Copyright@ Huỳnh Bá Sơn
         </div>
       </footer>
     </div>
