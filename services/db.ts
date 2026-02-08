@@ -41,7 +41,8 @@ const SEED_USERS: User[] = [
     role: Role.ADMIN,
     drawStartTime: toLocalISOString(new Date()),
     drawEndTime: toLocalISOString(new Date()),
-    hasDrawn: false
+    hasDrawn: false,
+    forceSingleGrade: false
   }
 ];
 
@@ -298,7 +299,9 @@ export const db = {
              drawEndTime: normalizeDateStr(row[6], new Date(Date.now() + 86400000)),
              hasDrawn: false,
              drawnClass: '',
-             drawnLessonId: undefined
+             drawnLessonId: undefined,
+             // Column 14 (index 14) for forceSingleGrade config
+             forceSingleGrade: String(row[14] || '').toLowerCase() === 'true'
            });
 
            // Link Draw Status
@@ -336,7 +339,8 @@ export const db = {
           role: Role.ADMIN,
           drawStartTime: toLocalISOString(new Date()),
           drawEndTime: toLocalISOString(new Date()),
-          hasDrawn: false
+          hasDrawn: false,
+          forceSingleGrade: false
         });
       }
 
