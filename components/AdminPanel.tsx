@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Lesson, Role, AppSettings } from '../types';
 import { db } from '../services/db';
-import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw, RotateCcw, Home, Zap, CheckSquare, Square } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, User as UserIcon, Plus, X, Save, Database, Download, FileSpreadsheet, Settings, Trash2, Layers, Book, Upload, AlertTriangle, Shield, ShieldOff, Lock, ChevronDown, RefreshCw, RotateCcw, Home, Zap, CheckSquare, Square, ToggleLeft, ToggleRight } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 interface Props {
@@ -105,6 +105,23 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
          } catch (e) {
            console.error("Time sync failed", e);
          }
+      }
+    }
+  };
+
+  const handleToggleGradeRestriction = async (userId: string) => {
+    const user = users.find(u => u.id === userId);
+    if (user && isSuperAdmin) {
+      const updated = { ...user, forceSingleGrade: !user.forceSingleGrade };
+      db.updateUser(updated);
+      refresh();
+      
+      if (db.getGoogleConfig()?.scriptUrl) {
+        try {
+          await db.syncUserToGoogle(updated);
+        } catch (e) {
+          console.error("Grade Restriction sync failed", e);
+        }
       }
     }
   };
@@ -337,7 +354,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
               drawStartTime: parseExcelDate(row[5], new Date()),
               drawEndTime: parseExcelDate(row[6], new Date(Date.now() + 86400000)),
               hasDrawn: false,
-              drawnClass: ''
+              drawnClass: '',
+              forceSingleGrade: false
             });
          });
          if (!newUsers.some(u => u.role === Role.ADMIN)) {
@@ -355,7 +373,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                     role: Role.ADMIN,
                     drawStartTime: localNow,
                     drawEndTime: localNow,
-                    hasDrawn: false
+                    hasDrawn: false,
+                    forceSingleGrade: false
                   });
             }
          }
@@ -437,7 +456,8 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
         subjectGroup: newUser.subjectGroup,
         drawStartTime: newUser.drawStartTime,
         drawEndTime: newUser.drawEndTime,
-        hasDrawn: false
+        hasDrawn: false,
+        forceSingleGrade: false
       };
       await db.addUser(userToAdd);
       setNewUser({
@@ -691,6 +711,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                   <th className="px-6 py-4">Quyền hạn</th>
                   <th className="px-6 py-4">Môn dạy</th>
                   <th className="px-6 py-4">Khung giờ bốc thăm</th>
+                  <th className="px-6 py-4 text-center">Số khối</th>
                   <th className="px-6 py-4">Trạng thái</th>
                   <th className="px-6 py-4 w-24">Hành động</th>
                 </tr>
@@ -762,6 +783,32 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                         </div>
                       </div>
                     </td>
+                    <td className="px-6 py-4 text-center">
+                        <button
+                           onClick={() => handleToggleGradeRestriction(user.id)}
+                           disabled={!isSuperAdmin}
+                           className={`
+                              flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all mx-auto
+                              ${user.forceSingleGrade 
+                                ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' 
+                                : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
+                              ${!isSuperAdmin ? 'cursor-not-allowed opacity-70' : ''}
+                           `}
+                           title={user.forceSingleGrade ? "Đang quy định: Chỉ được chọn 1 khối" : "Mặc định: Được chọn 1-2 khối"}
+                        >
+                           {user.forceSingleGrade ? (
+                               <>
+                                 <ToggleRight className="w-4 h-4" />
+                                 <span>1 Khối</span>
+                               </>
+                           ) : (
+                               <>
+                                 <ToggleLeft className="w-4 h-4" />
+                                 <span>Tùy chọn</span>
+                               </>
+                           )}
+                        </button>
+                    </td>
                     <td className="px-6 py-4">
                        {user.hasDrawn ? (
                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
@@ -808,7 +855,7 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                 )})}
                 {users.filter(u => u.role !== 'ADMIN').length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-slate-400">Chưa có dữ liệu giáo viên.</td>
+                    <td colSpan={8} className="text-center py-8 text-slate-400">Chưa có dữ liệu giáo viên.</td>
                   </tr>
                 )}
               </tbody>
