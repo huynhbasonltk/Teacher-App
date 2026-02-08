@@ -25,10 +25,11 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const isTooEarly = now < startTime;
   const isTooLate = now > endTime;
   
-  // Check if user subject requires 2 grades
+  // Check if user subject requires 2 grades (unless overriden by forceSingleGrade)
   const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc","Toán", "Ngữ văn", "Tiếng anh", "Khoa học tự nhiên", "Lịch sử và địa lí", "Giáo dục thể chất"];
   const userSubject = user.subjectGroup?.trim() || "";
   const isSpecialSubject = specialSubjects.some(s => s.toLowerCase() === userSubject.toLowerCase());
+  const isForceSingle = user.forceSingleGrade === true;
   
   // Update clock every second
   useEffect(() => {
@@ -53,6 +54,20 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   }, [user]);
 
   const toggleGrade = (grade: string) => {
+    if (isForceSingle) {
+      // Logic for strict single grade: behave like a radio button
+      if (selectedGrades.includes(grade)) {
+         // Optional: allow deselecting to empty? Yes.
+         setSelectedGrades([]);
+      } else {
+         // Select new grade, clear others
+         setSelectedGrades([grade]);
+      }
+      setError(null);
+      return;
+    }
+
+    // Default or Special Subject Logic (Multiselect max 2)
     if (selectedGrades.includes(grade)) {
       setSelectedGrades(prev => prev.filter(g => g !== grade));
       if (error && error.includes("tối đa")) setError(null);
@@ -68,12 +83,18 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
 
   const handleDraw = async () => {
     if (selectedGrades.length === 0) {
-      setError("Vui lòng chọn ít nhất 1 khối lớp để bốc thăm.");
+      setError("Vui lòng chọn khối lớp để bốc thăm.");
+      return;
+    }
+    
+    // 1. Check Force Single
+    if (isForceSingle && selectedGrades.length !== 1) {
+      setError("Theo quy định, thầy/cô chỉ được chọn đúng 1 khối lớp.");
       return;
     }
 
-    // Validation for special subjects
-    if (isSpecialSubject && selectedGrades.length < 2) {
+    // 2. Check Special Subjects (Only if NOT forced to single)
+    if (!isForceSingle && isSpecialSubject && selectedGrades.length < 2) {
       setError(`Đối với môn ${userSubject}, quy định bắt buộc phải chọn đủ 2 khối lớp.`);
       return;
     }
@@ -239,12 +260,19 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
               Lựa chọn khối lớp
             </h3>
             <p className="text-sm text-slate-500 mt-1">
-              {isSpecialSubject ? (
-                 <span>Đối với môn <strong className="text-blue-600">{user.subjectGroup}</strong>, quy định bắt buộc phải chọn <strong>đủ 2 khối lớp</strong>. </span>
+              {isForceSingle ? (
+                 <span className="text-purple-700 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                    <AlertCircle className="w-3 h-3 inline-block mr-1" />
+                    Yêu cầu: Chỉ chọn đúng <strong>1 khối lớp</strong>.
+                 </span>
               ) : (
-                 <span>Vui lòng chọn <strong>1 hoặc tối đa 2 khối lớp</strong> mong muốn giảng dạy. </span>
+                  isSpecialSubject ? (
+                    <span>Đối với môn <strong className="text-blue-600">{user.subjectGroup}</strong>, quy định bắt buộc phải chọn <strong>đủ 2 khối lớp</strong>. </span>
+                  ) : (
+                    <span>Vui lòng chọn <strong>1 hoặc tối đa 2 khối lớp</strong> mong muốn giảng dạy. </span>
+                  )
               )}
-              Hệ thống sẽ chọn ngẫu nhiên bài giảng trong các khối đã chọn, đồng thời <strong>ưu tiên các tiết chưa có người bốc</strong>.
+              <span className="block mt-1">Hệ thống sẽ chọn ngẫu nhiên bài giảng trong các khối đã chọn, đồng thời <strong>ưu tiên các tiết chưa có người bốc</strong>.</span>
             </p>
           </div>
           
