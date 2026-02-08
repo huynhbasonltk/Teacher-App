@@ -32,6 +32,7 @@ export interface User {
   drawnLessonId?: string;
   drawnClass?: string;   // New: The random class assigned
   subjectGroup?: string; // Môn giảng dạy
+  forceSingleGrade?: boolean; // New: Admin forces teacher to pick exactly 1 grade
 }
 
 export interface DrawRequest {
