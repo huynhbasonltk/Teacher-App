@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Lesson } from '../types';
+import { User, Lesson, ClassItem } from '../types';
 import { db } from '../services/db';
-import { Clock, BookOpen, Check, AlertCircle, Sparkles, XCircle, CalendarDays } from 'lucide-react';
+import { Clock, BookOpen, Check, AlertCircle, Sparkles, XCircle, CalendarDays, Users } from 'lucide-react';
 
 interface Props {
   user: User;
@@ -16,6 +16,7 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Lesson | null>(null);
   const [availableGrades, setAvailableGrades] = useState<string[]>([]);
+  const [allClasses, setAllClasses] = useState<ClassItem[]>([]);
 
   // Since db.ts now guarantees drawStartTime is "YYYY-MM-DDTHH:mm" (Local ISO),
   // new Date() will correctly interpret this as Local Time on the device.
@@ -29,6 +30,8 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc","Toán", "Ngữ văn", "Tiếng anh", "Khoa học tự nhiên", "Lịch sử và địa lí", "Giáo dục thể chất"];
   const userSubject = user.subjectGroup?.trim() || "";
   const isSpecialSubject = specialSubjects.some(s => s.toLowerCase() === userSubject.toLowerCase());
+  
+  // Logic for Force Single Grade
   const isForceSingle = user.forceSingleGrade === true;
   
   // Update clock every second
@@ -38,10 +41,13 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
   }, []);
 
   useEffect(() => {
-    // Load dynamic grades
+    // Load dynamic grades and classes
     const settings = db.getSettings();
-    if (settings && settings.grades) {
-      setAvailableGrades(settings.grades);
+    if (settings) {
+      if (settings.grades) {
+         setAvailableGrades(settings.grades);
+      }
+      if (settings.classes) setAllClasses(settings.classes);
     }
   }, []);
 
@@ -79,6 +85,10 @@ export const TeacherPanel: React.FC<Props> = ({ user, onUpdateUser }) => {
       setSelectedGrades(prev => [...prev, grade]);
       setError(null);
     }
+  };
+
+  const selectClass = (cls: ClassItem) => {
+      // Removed logic
   };
 
   const handleDraw = async () => {
