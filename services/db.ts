@@ -14,7 +14,7 @@ const SEED_CLASSES: ClassItem[] = [
 ];
 
 // Hardcoded Script URL provided by user
-const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyWxRpE_pC9hggF9Xq2Kpb13zvTFdjLkb3KIhw8CBhlEmjAbDpCizVqq8eBG7_pftGwFw/exec";
+const HARDCODED_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxEtnrv9BRVojWk8p8tn1Kf5BpkxxqgusAdtKjqhv4Nd1dhMQZz0VzYCujAIlmWHZWSAg/exec";
 
 // Helper: Convert Date object to Local ISO String "YYYY-MM-DDTHH:mm"
 const toLocalISOString = (d: Date) => {
@@ -300,8 +300,9 @@ export const db = {
              hasDrawn: false,
              drawnClass: '',
              drawnLessonId: undefined,
-             // Column 14 (index 14) for forceSingleGrade config
-             forceSingleGrade: String(row[14] || '').toLowerCase() === 'true'
+             // Column 14 (index 14) for forceSingleGrade config (Legacy/Unused?)
+             // Column 15 (index 15) for forceSingleGrade (New Request: Col 16)
+             forceSingleGrade: String(row[15] || '').toLowerCase() === 'true'
            });
 
            // Link Draw Status
@@ -396,6 +397,26 @@ export const db = {
     
     if (now < start || now > end) {
       throw new Error("Không nằm trong khung giờ được phép bốc thăm.");
+    }
+
+    if (selectedGrades.length === 0) {
+      throw new Error("Vui lòng chọn khối lớp để bốc thăm.");
+    }
+    
+    // Check Force Single Grade Logic (Boolean)
+    if (user.forceSingleGrade) {
+       if (selectedGrades.length !== 1) {
+          throw new Error("Theo quy định, thầy/cô chỉ được chọn đúng 1 khối lớp.");
+       }
+    } else {
+       // Only check special subjects if NOT forced single
+       const specialSubjects = ["Tin Học", "Tin học", "GDCD", "Mĩ thuật", "Âm nhạc","Toán", "Ngữ văn", "Tiếng anh", "Khoa học tự nhiên", "Lịch sử và địa lí", "Giáo dục thể chất"];
+       const userSubject = user.subjectGroup?.trim() || "";
+       const isSpecialSubject = specialSubjects.some(s => s.toLowerCase() === userSubject.toLowerCase());
+       
+       if (isSpecialSubject && selectedGrades.length < 2) {
+          throw new Error(`Đối với môn ${userSubject}, quy định bắt buộc phải chọn đủ 2 khối lớp.`);
+       }
     }
 
     const allLessons = db.getLessons();
