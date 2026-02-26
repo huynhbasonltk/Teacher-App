@@ -109,19 +109,34 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
     }
   };
 
+  const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+
   const handleToggleGradeRestriction = async (userId: string) => {
     const user = users.find(u => u.id === userId);
     if (user && isSuperAdmin) {
+      setUpdatingUserId(userId);
       const updated = { ...user, forceSingleGrade: !user.forceSingleGrade };
+      
+      // Optimistic update
       db.updateUser(updated);
       refresh();
       
       if (db.getGoogleConfig()?.scriptUrl) {
         try {
           await db.syncUserToGoogle(updated);
-        } catch (e) {
+          setSuccess(`Đã cập nhật cấu hình cho ${user.name}: ${updated.forceSingleGrade ? 'Chỉ chọn 1 khối' : 'Tùy chọn'}`);
+        } catch (e: any) {
           console.error("Grade Restriction sync failed", e);
+          setError(`Lỗi đồng bộ: ${e.message}`);
+          // Revert on error
+          db.updateUser(user);
+          refresh();
+        } finally {
+          setUpdatingUserId(null);
         }
+      } else {
+        setUpdatingUserId(null);
+        setSuccess("Đã cập nhật (Chưa cấu hình Google Sheet)");
       }
     }
   };
@@ -786,17 +801,22 @@ export const AdminPanel: React.FC<Props> = ({ currentUser }) => {
                     <td className="px-6 py-4 text-center">
                         <button
                            onClick={() => handleToggleGradeRestriction(user.id)}
-                           disabled={!isSuperAdmin}
+                           disabled={!isSuperAdmin || updatingUserId === user.id}
                            className={`
                               flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border transition-all mx-auto
                               ${user.forceSingleGrade 
                                 ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' 
                                 : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'}
-                              ${!isSuperAdmin ? 'cursor-not-allowed opacity-70' : ''}
+                              ${(!isSuperAdmin || updatingUserId === user.id) ? 'cursor-not-allowed opacity-70' : ''}
                            `}
                            title={user.forceSingleGrade ? "Đang quy định: Chỉ được chọn 1 khối" : "Mặc định: Được chọn 1-2 khối"}
                         >
-                           {user.forceSingleGrade ? (
+                           {updatingUserId === user.id ? (
+                               <>
+                                 <RefreshCw className="w-4 h-4 animate-spin" />
+                                 <span>Đang lưu...</span>
+                               </>
+                           ) : user.forceSingleGrade ? (
                                <>
                                  <ToggleRight className="w-4 h-4" />
                                  <span>1 Khối</span>
